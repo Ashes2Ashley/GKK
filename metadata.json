@@ -1,5 +1,5 @@
 {
-  "name": "kali infra",
+  "name": "Kali Infra",
   "description": "Implement a professional-grade automated setup for 5G network adaptability and WebRTC infrastructure, enabling seamless connectivity with airborne and ground networks. Incorporate a customized Kali Linux environment to enhance operational capabilities, and develop an intuitive yet highly functional SIM module for secure payload management tailored to administrative operations. Ensure all communications are protected with robust encryption and security protocols, complemented by comprehensive real-time monitoring, logging, and modular remote configuration to maintain optimal performance and reliability in dynamic network conditions.",
   "requestFramePermissions": [],
   "majorCapabilities": [

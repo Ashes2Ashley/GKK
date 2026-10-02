@@ -29,6 +29,25 @@ import com.example.data.telecom.WebRtcState
 import com.example.data.websocket.AppWebSocketManager
 import com.example.data.websocket.WebSocketMessage
 import com.example.data.websocket.WebSocketStatus
+import com.example.data.fiveg.AdaptationEvent
+import com.example.data.fiveg.FiveGAdaptabilityEngine
+import com.example.data.fiveg.FiveGSlice
+import com.example.data.fiveg.LinkPerformanceState
+import com.example.data.fiveg.NetworkTopology
+import com.example.data.webrtc.AirborneTelemetry
+import com.example.data.webrtc.AirborneWebRtcManager
+import com.example.data.webrtc.WebRtcInfrastructureSession
+import com.example.data.sim.AdminPayloadType
+import com.example.data.sim.EncryptedPayloadEnvelope
+import com.example.data.sim.SimHardwareState
+import com.example.data.sim.SimPayloadManager
+import com.example.data.sim.SimSlotId
+import com.example.data.kali.KaliEnvironmentManager
+import com.example.data.kali.KaliLogEntry
+import com.example.data.config.ModularRemoteConfig
+import com.example.data.config.RemoteConfigManager
+import com.example.data.config.SystemLogItem
+import com.example.data.config.TacticalPreset
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -141,6 +160,21 @@ class MainViewModel(
     val startupHealth: StateFlow<StartupHealthMetrics> = AppStartupStabilizer.healthMetrics
     val webSocketStatus: StateFlow<WebSocketStatus> = AppWebSocketManager.status
     val webSocketMessages: StateFlow<List<WebSocketMessage>> = AppWebSocketManager.messages
+
+    // 5G Network Adaptability & WebRTC Infrastructure Streams
+    val linkPerformanceState: StateFlow<LinkPerformanceState> = FiveGAdaptabilityEngine.linkState
+    val adaptationHistory: StateFlow<List<AdaptationEvent>> = FiveGAdaptabilityEngine.adaptationHistory
+    val airborneTelemetry: StateFlow<AirborneTelemetry> = AirborneWebRtcManager.telemetry
+    val webrtcSession: StateFlow<WebRtcInfrastructureSession> = AirborneWebRtcManager.session
+
+    // SIM Module & Cryptographic Envelopes
+    val simHardwareState: StateFlow<SimHardwareState> = SimPayloadManager.hardwareState
+    val simEnvelopes: StateFlow<List<EncryptedPayloadEnvelope>> = SimPayloadManager.envelopes
+
+    // Kali Operational Console & Modular Remote Configuration
+    val kaliTerminalBuffer: StateFlow<List<KaliLogEntry>> = KaliEnvironmentManager.terminalBuffer
+    val modularRemoteConfig: StateFlow<ModularRemoteConfig> = RemoteConfigManager.config
+    val systemLogs: StateFlow<List<SystemLogItem>> = RemoteConfigManager.logs
 
     val filteredPosts: StateFlow<List<Post>> = combine(_uiState, cachedPosts) { state, cached ->
         val posts = if (state.isOfflineMode) {
@@ -673,5 +707,90 @@ class MainViewModel(
 
     fun dismissCreateSuccess() {
         _uiState.value = _uiState.value.copy(createPostResult = null)
+    }
+
+    // --- 5G Network Adaptability Actions ---
+    fun selectTopology(topology: NetworkTopology) {
+        FiveGAdaptabilityEngine.setTopology(topology)
+        RemoteConfigManager.addLog("INFO", "5G-NR", "Topology switched to ${topology.displayName}")
+    }
+
+    fun selectSlice(slice: FiveGSlice) {
+        FiveGAdaptabilityEngine.setSlice(slice)
+        RemoteConfigManager.addLog("INFO", "5G-NR", "Allocated 5G Network Slice: ${slice.label}")
+    }
+
+    fun toggleAutoAdaptation(enabled: Boolean) {
+        FiveGAdaptabilityEngine.toggleAutoAdaptation(enabled)
+        RemoteConfigManager.toggleAutoAdaptation(enabled)
+    }
+
+    fun setFecRedundancy(percent: Int) {
+        FiveGAdaptabilityEngine.setFecRedundancy(percent)
+    }
+
+    fun simulateRfDegradation() {
+        FiveGAdaptabilityEngine.simulateRfDegradation()
+        RemoteConfigManager.addLog("WARN", "5G-NR", "Injected RF signal fade test for auto-handoff verification")
+    }
+
+    // --- Airborne & Ground WebRTC Actions ---
+    fun initiateWebRtcSignaling() {
+        AirborneWebRtcManager.initiateSignaling()
+        RemoteConfigManager.addLog("INFO", "WEBRTC", "Initiated WebRTC ICE signaling & DTLS 1.3 handshake")
+    }
+
+    fun disconnectWebRtc() {
+        AirborneWebRtcManager.disconnectSession()
+        RemoteConfigManager.addLog("WARN", "WEBRTC", "WebRTC session disconnected by operator")
+    }
+
+    fun sendWebRtcDataChannelMessage(msg: String) {
+        AirborneWebRtcManager.sendTacticalDataChannelMessage(msg)
+        RemoteConfigManager.addLog("SECURE", "WEBRTC", "DataChannel TX: $msg")
+    }
+
+    // --- Administrative SIM Module Actions ---
+    fun selectSimSlot(slot: SimSlotId) {
+        SimPayloadManager.selectSimSlot(slot)
+        RemoteConfigManager.addLog("INFO", "SIM-OTA", "Selected hardware slot: ${slot.label}")
+    }
+
+    fun createAndSignAdminPayload(
+        type: AdminPayloadType,
+        json: String,
+        targetIccid: String,
+        channel: String
+    ) {
+        val env = SimPayloadManager.createAndSignPayload(type, json, targetIccid, channel)
+        RemoteConfigManager.addLog("SECURE", "SIM-OTA", "Packaged & signed payload ${env.envelopeId} via AES-256-GCM")
+    }
+
+    fun dispatchAdminEnvelope(envelopeId: String) {
+        SimPayloadManager.dispatchEnvelope(envelopeId)
+        RemoteConfigManager.addLog("SUCCESS", "SIM-OTA", "Dispatched administrative envelope: $envelopeId")
+    }
+
+    // --- Kali Linux Operational Console ---
+    fun executeKaliCommand(command: String) {
+        KaliEnvironmentManager.executeCommand(command)
+        RemoteConfigManager.addLog("INFO", "KALI-AUDIT", "Executed: $command")
+    }
+
+    // --- Modular Remote Config Actions ---
+    fun applyTacticalPreset(preset: TacticalPreset) {
+        RemoteConfigManager.applyPreset(preset)
+    }
+
+    fun setWebRtcBitrateCeiling(kbps: Int) {
+        RemoteConfigManager.setBitrateCeiling(kbps)
+    }
+
+    fun toggleStrictCertPinning(enabled: Boolean) {
+        RemoteConfigManager.toggleStrictCertPinning(enabled)
+    }
+
+    fun clearSystemLogs() {
+        RemoteConfigManager.clearLogs()
     }
 }

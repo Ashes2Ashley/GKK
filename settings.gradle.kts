@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "ApiConnect"
+rootProject.name = "Kali Infra"
 
 include(":app")
