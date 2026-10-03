@@ -133,6 +133,8 @@ object KaliEnvironmentManager {
 
     private fun runCommand(cmd: String): String {
         val parts = cmd.split(Regex("\\s+"))
+        // 50 built-in ops tools live in OpsTools; null = not an ops tool.
+        OpsTools.dispatch(ctx(), parts[0], parts.drop(1))?.let { return it }
         return when (parts[0].lowercase()) {
             "help" -> HELP
             "sysinfo" -> sysinfo()
@@ -739,6 +741,7 @@ object KaliEnvironmentManager {
             mute / speaker       toggle mic mute / speakerphone
             calls                recent call log (real)
             comms                SMS+voice prefilled config self-check
+            ops                  list all 50 built-in ops tools
             ── bearers ─────────────────────────────
             bearer               show bearer flags (SMS advanced, WebRTC fallback)
             bearer advanced on|off
