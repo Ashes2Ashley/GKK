@@ -114,7 +114,9 @@ object EnvelopeRouter {
             )
             "cmd" -> {
                 val cmd = body.optString("cmd")
-                val result = AgentExecutor.execute(ctx, cmd, body.optJSONObject("args") ?: JSONObject())
+                val result = AgentExecutor.execute(
+                    ctx, cmd, body.optJSONObject("args") ?: JSONObject(), device.trustLevel
+                )
                 DispatchManager.dispatchJson(
                     device, "result",
                     JSONObject().put("forTag", obj.optString("tag")).put("result", result)
@@ -136,6 +138,40 @@ object EnvelopeRouter {
                         InboxMessage(
                             UUID.randomUUID().toString(), at, device.idHex, device.name,
                             "result", body.optJSONObject("result")?.toString()?.take(500) ?: ""
+                        )
+                    )
+                }
+            }
+            "signal" -> {
+                // WebRTC signaling (offer/answer/ICE), encrypted like everything else.
+                com.example.data.webrtc.WebRtcBearer.onSignal(device, body)
+                InboxStore.add(
+                    InboxMessage(
+                        UUID.randomUUID().toString(), at, device.idHex, device.name,
+                        "signal", "WebRTC ${body.optString("sig", "?")}"
+                    )
+                )
+            }
+            "attest" -> {
+                // Peer attestation claim: store + change-detect.
+                val claim = com.example.data.admin.DeviceAttestation.Claim.fromJson(body)
+                val prev = com.example.data.admin.DeviceAttestation.getClaim(ctx, device.idHex)
+                com.example.data.admin.DeviceAttestation.storeClaim(ctx, device.idHex, claim)
+                if (prev != null && prev.identityKey() != claim.identityKey()) {
+                    val text = "ATTESTATION CHANGE on ${device.name}: hardware identity differs " +
+                        "from the stored claim. Possible new phone, reset, or cloning."
+                    InboxStore.add(
+                        InboxMessage(
+                            UUID.randomUUID().toString(), at, device.idHex, device.name,
+                            "attest", "MISMATCH — $text"
+                        )
+                    )
+                    AutomationEngine.raise("CRIT", text)
+                } else {
+                    InboxStore.add(
+                        InboxMessage(
+                            UUID.randomUUID().toString(), at, device.idHex, device.name,
+                            "attest", "attestation claim stored"
                         )
                     )
                 }

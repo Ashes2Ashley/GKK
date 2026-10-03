@@ -19,6 +19,7 @@ class ApiConnectApplication : Application() {
         // so background data-SMS receipt + heartbeats work.
         com.example.data.kali.KaliEnvironmentManager.init(this)
         com.example.data.voice.VoiceCallManager.init(this)
+        com.example.data.bearer.BearerManager.init(this)
         com.example.data.kali.KaliEnvironmentManager.boot()
         com.example.data.dispatch.HeartbeatManager.start(this)
     }

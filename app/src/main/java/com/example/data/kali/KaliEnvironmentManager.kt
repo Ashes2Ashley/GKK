@@ -8,7 +8,13 @@ import android.location.LocationManager
 import android.os.Build
 import android.telephony.TelephonyManager
 import androidx.core.content.ContextCompat
+import com.example.data.admin.DeviceAttestation
+import com.example.data.bearer.BearerConfig
+import com.example.data.bearer.BearerManager
+import com.example.data.net.MdnsDiscovery
+import com.example.data.net.NetIntel
 import com.example.data.voice.VoiceCallManager
+import com.example.data.webrtc.WebRtcBearer
 import com.example.data.dispatch.AgentExecutor
 import com.example.data.dispatch.AutomationEngine
 import com.example.data.dispatch.DispatchManager
@@ -201,6 +207,16 @@ object KaliEnvironmentManager {
             "speaker" -> speaker()
             "calls" -> calls()
             "comms" -> comms()
+            "bearer" -> bearer(parts.drop(1))
+            "rtc" -> rtc(parts.drop(1))
+            "netintel" -> netintel()
+            "attest" -> attest(parts.drop(1))
+            "trustlevel" -> {
+                val name = parts.getOrNull(1) ?: return "usage: trustlevel <name> <0-100+>"
+                val level = parts.getOrNull(2)?.toIntOrNull()
+                    ?: return "usage: trustlevel <name> <0-100+>"
+                trustlevel(name, level)
+            }
             else -> "unknown command: '${parts[0]}' — type 'help'. (Fiction was removed from this console.)"
         }
     }
@@ -393,9 +409,9 @@ object KaliEnvironmentManager {
         if (text.isBlank()) return "nothing to send"
         if (text.toByteArray().size > 4000) return "message too long (max ~4000 bytes)"
         val dev = findDevice(target) ?: return "no such device: '$target' (try: devices)"
-        val r = DispatchManager.dispatchText(dev, text)
+        val r = BearerManager.sendText(dev, text)
         return r.fold(
-            onSuccess = { n -> "sent to ${dev.name} in $n segment(s) — sealed Envelope v1" },
+            onSuccess = { via -> "sent to ${dev.name} via $via — sealed Envelope v1" },
             onFailure = { e -> "dispatch failed: ${e.message}" }
         )
     }
@@ -552,6 +568,119 @@ object KaliEnvironmentManager {
         }.toString()
     }
 
+    // ---------- bearers ----------
+
+    private fun bearer(args: List<String>): String {
+        if (args.isEmpty()) return BearerConfig.report()
+        return when (args[0]) {
+            "advanced" -> {
+                val on = args.getOrNull(1) ?: return "usage: bearer advanced on|off"
+                BearerConfig.setAdvancedSmsSend(on == "on")
+                "advanced SMS send ${if (on == "on") "ON" else "OFF"}"
+            }
+            "webrtc" -> {
+                val on = args.getOrNull(1) ?: return "usage: bearer webrtc on|off"
+                BearerConfig.setWebrtcFallback(on == "on")
+                "WebRTC fallback ${if (on == "on") "ON" else "OFF"}"
+            }
+            "order" -> {
+                val order = args.getOrNull(1)?.split(",") ?: return "usage: bearer order sms,webrtc"
+                if (BearerConfig.setPriority(order)) "bearer priority: ${BearerConfig.priority.value.joinToString(" -> ")}"
+                else "invalid order (use sms and/or webrtc)"
+            }
+            else -> "usage: bearer [advanced on|off] [webrtc on|off] [order sms,webrtc]"
+        }
+    }
+
+    private fun rtc(args: List<String>): String {
+        val sub = args.getOrNull(0) ?: return "usage: rtc discover|status|connect <name>|close <name>"
+        return when (sub) {
+            "discover" -> {
+                val peers = MdnsDiscovery.peers.value
+                if (peers.isEmpty()) {
+                    "no WebRTC peers discovered on the LAN yet — both devices need the app " +
+                        "running with IP connectivity"
+                } else {
+                    peers.values.joinToString("\n") {
+                        "${it.idHex.take(8)}\u2026  ${it.ip}:${it.port}"
+                    }
+                }
+            }
+            "status" -> {
+                val conns = WebRtcBearer.connections.value
+                if (conns.isEmpty()) "no WebRTC sessions"
+                else conns.entries.joinToString("\n") { (id, c) ->
+                    val name = findDevice(id)?.name ?: id.take(8)
+                    "$name: ${c.state} (${c.detail})"
+                }
+            }
+            "connect" -> {
+                val name = args.getOrNull(1) ?: return "usage: rtc connect <name>"
+                val dev = findDevice(name) ?: return "no such device: '$name'"
+                WebRtcBearer.connect(dev).fold(
+                    onSuccess = { "connecting to ${dev.name}: $it" },
+                    onFailure = { e -> "rtc connect failed: ${e.message}" }
+                )
+            }
+            "close" -> {
+                val name = args.getOrNull(1) ?: return "usage: rtc close <name>"
+                val dev = findDevice(name) ?: return "no such device: '$name'"
+                WebRtcBearer.close(dev.idHex)
+                "closed WebRTC session to ${dev.name}"
+            }
+            else -> "usage: rtc discover|status|connect <name>|close <name>"
+        }
+    }
+
+    private fun netintel(): String {
+        return try {
+            NetIntel.format(NetIntel.probe())
+        } catch (e: Exception) {
+            "netintel failed: ${e.message}"
+        }
+    }
+
+    // ---------- attestation (admin) ----------
+
+    private fun attest(args: List<String>): String {
+        val c = ctx()
+        val sub = args.getOrNull(0)
+        if (sub == null) {
+            // Local claim.
+            return "== this device ==\n" + DeviceAttestation.collectLocal(c).summary()
+        }
+        val name = args.getOrNull(1) ?: return "usage: attest [send <name>|verify <name>]"
+        val dev = findDevice(name) ?: return "no such device: '$name'"
+        return when (sub) {
+            "send" -> {
+                val claim = DeviceAttestation.collectLocal(c)
+                DispatchManager.dispatchJson(dev, "attest", claim.toJson()).fold(
+                    onSuccess = { "attestation claim sent to ${dev.name} (encrypted)" },
+                    onFailure = { e -> "attest send failed: ${e.message}" }
+                )
+            }
+            "verify" -> {
+                val stored = DeviceAttestation.getClaim(c, dev.idHex)
+                    ?: return "no stored attestation for ${dev.name} — " +
+                        "have them run 'attest send <your-name>' (or request via agent: runcmd)"
+                "== stored claim for ${dev.name} ==\n" + stored.summary() +
+                    "\n(fresh claims are change-detected automatically on arrival)"
+            }
+            else -> "usage: attest [send <name>|verify <name>]"
+        }
+    }
+
+    private fun trustlevel(name: String, level: Int): String {
+        if (level < 0) return "level must be >= 0"
+        val dev = findDevice(name) ?: return "no such device: '$name'"
+        return if (DispatchManager.registry().setTrustLevel(dev.idHex, level)) {
+            "trust level for ${dev.name} set to $level" +
+                (if (level >= DeviceAttestation.ADMIN_TRUST_LEVEL) " (ADMIN — may request attestation)" else "")
+        } else {
+            "failed to set trust level"
+        }
+    }
+
     private fun beacon(): String {
         val c = ctx()
         val loc = try {
@@ -610,6 +739,20 @@ object KaliEnvironmentManager {
             mute / speaker       toggle mic mute / speakerphone
             calls                recent call log (real)
             comms                SMS+voice prefilled config self-check
+            ── bearers ─────────────────────────────
+            bearer               show bearer flags (SMS advanced, WebRTC fallback)
+            bearer advanced on|off
+            bearer webrtc on|off
+            bearer order sms,webrtc
+            rtc discover         mDNS peers on the LAN (real)
+            rtc connect <name>   WebRTC data-channel fallback session
+            rtc status|close <name>
+            netintel             local IPs + public IP + NAT type (STUN)
+            ── admin ───────────────────────────────
+            attest               this device's hardware claim
+            attest send <name>   send claim encrypted to a peer
+            attest verify <name> show stored peer claim
+            trustlevel <name> <n>  set peer trust (100+ = admin)
             ── observe ─────────────────────────────
             monitors             list the 15 live monitors
             monitor <name>       current reading of one monitor

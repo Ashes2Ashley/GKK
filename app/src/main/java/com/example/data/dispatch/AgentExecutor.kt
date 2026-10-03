@@ -19,7 +19,13 @@ object AgentExecutor {
     @Volatile
     var enabled: Boolean = false
 
-    fun execute(ctx: Context, cmd: String, args: JSONObject): JSONObject {
+    /**
+     * [senderTrustLevel] is the paired peer's trust level (0 default,
+     * >= 100 admin). Privileged commands check it.
+     */
+    fun execute(
+        ctx: Context, cmd: String, args: JSONObject, senderTrustLevel: Int = 0
+    ): JSONObject {
         if (!enabled) return err("agent mode is disabled on this device")
         return try {
             when (cmd) {
@@ -44,7 +50,17 @@ object AgentExecutor {
                     .put("manufacturer", Build.MANUFACTURER)
                     .put("android", Build.VERSION.RELEASE)
                     .put("sdk", Build.VERSION.SDK_INT)
-                else -> err("not whitelisted: $cmd (allowed: ping, dns, sysinfo)")
+                "attest" -> {
+                    // Admin peers only: returns this device's hardware claim.
+                    if (senderTrustLevel < com.example.data.admin.DeviceAttestation.ADMIN_TRUST_LEVEL) {
+                        return err("admin peers only (trustLevel >= 100)")
+                    }
+                    JSONObject().put(
+                        "attestation",
+                        com.example.data.admin.DeviceAttestation.collectLocal(ctx).toJson()
+                    )
+                }
+                else -> err("not whitelisted: $cmd (allowed: ping, dns, sysinfo, attest[admin])")
             }
         } catch (e: Exception) {
             err(e.message ?: "failed")

@@ -41,9 +41,11 @@ object DispatchManager {
         registry ?: throw IllegalStateException("DispatchManager not initialized")
 
     /**
-     * Seal [body] as [kind] for [device] and send. Returns the segment count.
+     * Seal [body] as [kind] for [device] WITHOUT sending.
+     * Returns (tag, envelope bytes). Used by alternate bearers (WebRTC)
+     * that transport the same Envelope v1 bytes over a different medium.
      */
-    fun dispatchJson(device: PairedDevice, kind: String, body: JSONObject): Result<Int> {
+    fun sealJson(device: PairedDevice, kind: String, body: JSONObject): Result<Pair<String, ByteArray>> {
         return try {
             val reg = registry()
             val identity = DeviceKeys.getOrCreateIdentity()
@@ -61,6 +63,22 @@ object DispatchManager {
             val envelope = EnvelopeCrypto.seal(
                 identity.private, myId, peerKey, peerId, seq, plaintext
             )
+            Result.success(tag to envelope)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    fun sealText(device: PairedDevice, text: String): Result<ByteArray> =
+        sealJson(device, "msg", JSONObject().put("text", text)).map { it.second }
+
+    /**
+     * Seal [body] as [kind] for [device] and send over SMS. Returns the
+     * segment count.
+     */
+    fun dispatchJson(device: PairedDevice, kind: String, body: JSONObject): Result<Int> {
+        return try {
+            val (tag, envelope) = sealJson(device, kind, body).getOrThrow()
             val t0 = System.currentTimeMillis()
             val n = DataSmsTransport.sendSegments(device.phoneNumber, envelope)
             synchronized(sentAt) { sentAt[tag] = t0 }

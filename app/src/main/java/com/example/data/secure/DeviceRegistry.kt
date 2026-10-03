@@ -23,7 +23,12 @@ data class PairedDevice(
     val publicKeyB64: String, // X.509 P-256, Base64
     val phoneNumber: String,  // E.164, for the SMS bearer
     val lastSeqSent: Long = 0,
-    val lastSeqSeen: Long = 0
+    val lastSeqSeen: Long = 0,
+    // Trust level: 0 = standard paired peer, >= 100 = admin peer.
+    // Admin peers may request device attestation and other privileged
+    // agent commands. Set explicitly by the local operator; never 100
+    // by default. Console: `trustlevel <name> <0-100>`.
+    val trustLevel: Int = 0
 )
 
 class DeviceRegistry(context: Context) {
@@ -39,19 +44,22 @@ class DeviceRegistry(context: Context) {
             d.publicKeyB64,
             d.phoneNumber.replace("\t", " "),
             d.lastSeqSent.toString(),
-            d.lastSeqSeen.toString()
+            d.lastSeqSeen.toString(),
+            d.trustLevel.toString()
         ).joinToString("\t")
 
     private fun deserialize(idHex: String, raw: String): PairedDevice? {
         val parts = raw.split("\t")
-        if (parts.size != 5) return null
+        // v1 rows had 5 fields; v2 adds trustLevel. Old rows load as level 0.
+        if (parts.size != 5 && parts.size != 6) return null
         return PairedDevice(
             idHex = idHex,
             name = parts[0],
             publicKeyB64 = parts[1],
             phoneNumber = parts[2],
             lastSeqSent = parts[3].toLongOrNull() ?: 0,
-            lastSeqSeen = parts[4].toLongOrNull() ?: 0
+            lastSeqSeen = parts[4].toLongOrNull() ?: 0,
+            trustLevel = if (parts.size == 6) parts[5].toIntOrNull() ?: 0 else 0
         )
     }
 
@@ -109,5 +117,13 @@ class DeviceRegistry(context: Context) {
     @Synchronized
     fun clear() {
         prefs.edit().clear().apply()
+    }
+
+    /** Set a peer's trust level (0-100+). Returns false for unknown device. */
+    @Synchronized
+    fun setTrustLevel(idHex: String, level: Int): Boolean {
+        val d = get(idHex) ?: return false
+        prefs.edit().putString(key(idHex), serialize(d.copy(trustLevel = level))).apply()
+        return true
     }
 }

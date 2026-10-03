@@ -121,6 +121,30 @@ is missing or hardware is absent — never an invented reading.
   if the permission isn't granted it stays silent instead of pretending.
 - Every permission gate fails with the honest reason, never a fake "calling…".
 
+## Bearers: SMS advanced + WebRTC fallback
+- Bearer flags (persisted, prefilled, console `bearer`): advanced SMS send
+  ON/OFF, WebRTC fallback ON/OFF, bearer priority order.
+- Advanced SMS: walks every active SIM subscription, per-SIM retry with
+  exponential backoff (2s/4s), per-SIM stats. Main-thread safe.
+- WebRTC fallback: real org.webrtc PeerConnection (io.getstream
+  StreamVideo WebRTC build from Maven Central — the official artifact only
+  ever shipped to jCenter, which is dead), single ordered DataChannel
+  carrying the same Envelope v1 bytes as SMS. Signaling (offer/answer/ICE)
+  as encrypted "signal" envelopes over UDP to the mDNS-discovered peer —
+  no server. STUN for NAT traversal. `rtc discover|connect|status|close`.
+- BearerManager tries bearers in priority order; every failure names every
+  bearer's real cause.
+
+## IP + IMEI intelligence (admin)
+- `netintel`: real interface enumeration + public IP and NAT type via a
+  hand-rolled RFC 5389 STUN client (pure UDP, no HTTP). NAT class from two
+  STUN servers: open / cone / symmetric. Codec unit-tested on JVM.
+- Device attestation: real IMEI (honest UNAVAILABLE on Android 10+ for
+  non-privileged apps), ANDROID_ID, build fingerprint. `attest` /
+  `attest send` / `attest verify`; inbound claims are change-detected
+  (mismatch raises a CRIT alert). Remote `attest` agent command answers
+  ONLY admin peers (trustLevel >= 100, set via `trustlevel <name> <n>`).
+
 ## Explicitly cut
 - Fake Kali command output (`nmap` fiction), fake WebRTC/SIP calls, fake
   SIM hardware state, fake 5G telemetry, fake "dispatch" status flips.
