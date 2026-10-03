@@ -78,13 +78,28 @@ Design laws:
 ## Build order
 1. Crypto foundation (Envelope v1, Keystore identities, registry) — DONE,
    protocol verified against independent Python reference.
-2. Data-SMS transport (segmenter, receiver, reassembly).
-3. Kali console rewired to real commands + dispatch.
-4. Pairing (QR) + inbox UI.
-5. Fleet features (heartbeats, remote exec, broadcast).
-6. Radio inspectors + link monitor.
-7. Vault, file transfer, SOS, automation rules.
+2. Data-SMS transport (segmenter, receiver, reassembly) — DONE, segmenter
+   fuzz-verified (300 trials) + JVM tests.
+3. Dispatch layer (seal→send, verified inbox, heartbeats, automation
+   watchdog, agent mode) — DONE.
+4. Kali console rewired to real commands — DONE (22 real commands, fiction
+   deleted).
+5. 15 real-time monitors (7 comms + 8 system) + Live screen — DONE.
+6. Pairing UI (QR) + inbox UI polish.
+7. Group broadcast, encrypted file transfer, vault.
 8. Harden: audit, on-device testing, Play policy review (SMS permissions).
+
+## The 15 real-time features (all live, zero mock data)
+Comms: chat (verified inbox stream) · sms (data-SMS traffic log) ·
+link (wifi+cell composite ticker) · console (live console tail) ·
+alerts (automation event feed) · rtt (dispatch→reply latency) ·
+fleet (heartbeat board).
+System: battery (level/temp/voltage/state) · sensors (accel/light/prox live) ·
+gps (live fix, permission-honest) · traffic (per-app throughput) ·
+wifi (RSSI/link speed/SSID) · cell (dBm/operator/radio type) ·
+ble (live nearby-device scan) · ntp (real SNTP offset vs pool.ntp.org).
+Each monitor reports UNAVAILABLE with the honest reason when a permission
+is missing or hardware is absent — never an invented reading.
 
 ## Explicitly cut
 - Fake Kali command output (`nmap` fiction), fake WebRTC/SIP calls, fake

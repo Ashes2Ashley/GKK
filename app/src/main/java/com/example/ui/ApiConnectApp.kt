@@ -42,6 +42,7 @@ import com.example.ui.screens.CloudflareEdgeScreen
 import com.example.ui.screens.FavoritesScreen
 import com.example.ui.screens.FiveGAdaptabilityScreen
 import com.example.ui.screens.KaliConsoleScreen
+import com.example.ui.screens.LiveScreen
 import com.example.ui.screens.PostsScreen
 import com.example.ui.screens.RestClientScreen
 import com.example.ui.screens.SecurityConfigScreen
@@ -86,6 +87,7 @@ fun ApiConnectApp(
                             4 -> "Kali Infra • Security Policies"
                             5 -> "Kali Infra • REST Diagnostics"
                             6 -> "Kali Infra • Offline Data Sync"
+                            8 -> "Kali Infra • Live Monitors"
                             else -> "Kali Infra • System Administration"
                         },
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
@@ -147,6 +149,10 @@ fun ApiConnectApp(
                             DropdownMenuItem(
                                 text = { Text("Root Admin & Stabilizer") },
                                 onClick = { viewModel.setTab(7); showMenu = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Live Monitors") },
+                                onClick = { viewModel.setTab(8); showMenu = false }
                             )
                         }
                     }
@@ -258,6 +264,7 @@ fun ApiConnectApp(
                     onToggleStrictTls = viewModel::toggleStrictTls,
                     onToggleCertPinning = viewModel::toggleCertPinning
                 )
+                8 -> LiveScreen()
                 else -> FiveGAdaptabilityScreen(
                     linkState = linkState,
                     adaptationHistory = adaptationHistory,

@@ -15,6 +15,11 @@ class ApiConnectApplication : Application() {
         database = AppDatabase.getInstance(this)
         RetrofitClient.initializeCache(this)
         com.example.data.startup.AppStartupStabilizer.stabilize(this)
+        // GKK secure channel: dispatch stack ready even if the UI never opens,
+        // so background data-SMS receipt + heartbeats work.
+        com.example.data.kali.KaliEnvironmentManager.init(this)
+        com.example.data.kali.KaliEnvironmentManager.boot()
+        com.example.data.dispatch.HeartbeatManager.start(this)
     }
 
     companion object {
