@@ -1407,7 +1407,7 @@ cmd("textstats", "reading level and vocabulary stats for some text", async (a) =
 cmd("caseconv", "switch text between UPPER, lower, Title and camelCase", async (a) => {
   if (a.length < 2) throw new Error("usage: caseconv <upper|lower|title|camel|snake> <text>");
   const mode = a[0].toLowerCase(), t = a.slice(1).join(" ");
-  const words = t.split(/[\s_\-]+/).filter(Boolean);
+  const words = t.replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(/[\s_\-]+/).filter(Boolean);
   let out = t;
   if (mode === "upper") out = t.toUpperCase();
   else if (mode === "lower") out = t.toLowerCase();
