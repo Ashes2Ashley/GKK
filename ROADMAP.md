@@ -78,6 +78,16 @@ Design laws:
 ## Build order
 1. Crypto foundation (Envelope v1, Keystore identities, registry) — DONE,
    protocol verified against independent Python reference.
+2. Transport + console + 15 real-time monitors — DONE (source; build/device
+   proof still required before any "working" claim).
+3. Voice calling + floating overlay — DONE (source): real carrier calls via
+   ACTION_CALL, live call-state tracking, mute/speaker/hangup, real call log,
+   floating overlay on RINGING/OFFHOOK. Console: call/hangup/mute/speaker/calls.
+4. Hardening — DONE (source): SIM-ready fail-fast + phone validation on send,
+   per-sender inbound rate limit (20/min, SMS-spam DoS guard), 2000-char
+   command cap, 4000-byte dispatch cap.
+5. `comms` self-check: prefilled SMS+voice configuration is probed live and
+   reported CONFIRMED/MISSING — zero manual setup.
 2. Data-SMS transport (segmenter, receiver, reassembly) — DONE, segmenter
    fuzz-verified (300 trials) + JVM tests.
 3. Dispatch layer (seal→send, verified inbox, heartbeats, automation
@@ -100,6 +110,16 @@ wifi (RSSI/link speed/SSID) · cell (dBm/operator/radio type) ·
 ble (live nearby-device scan) · ntp (real SNTP offset vs pool.ntp.org).
 Each monitor reports UNAVAILABLE with the honest reason when a permission
 is missing or hardware is absent — never an invented reading.
+
+## Voice calling — what "real" means here
+- Outbound calls go through the real carrier (ACTION_CALL). No VoIP, no SIP
+  server, no fake dialer — the phone actually rings the number.
+- Call state comes from the real TelephonyCallback/PhoneStateListener.
+- mute/speaker use the real AudioManager; hangup uses TelecomManager.endCall
+  (needs ANSWER_PHONE_CALLS, granted by the user — otherwise it says so).
+- The overlay is a real SYSTEM_ALERT_WINDOW floating view with live duration;
+  if the permission isn't granted it stays silent instead of pretending.
+- Every permission gate fails with the honest reason, never a fake "calling…".
 
 ## Explicitly cut
 - Fake Kali command output (`nmap` fiction), fake WebRTC/SIP calls, fake

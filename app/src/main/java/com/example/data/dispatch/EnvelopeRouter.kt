@@ -23,6 +23,26 @@ object EnvelopeRouter {
 
     private const val TAG = "EnvelopeRouter"
 
+    /**
+     * Inbound rate limiter: max 20 envelopes/minute per sender. SMS is an
+     * unauthenticated bearer - without this, anyone who knows the port can
+     * burn battery/CPU by flooding us. Excess is dropped and logged.
+     */
+    private object InboundRateLimiter {
+        private const val MAX_PER_MIN = 20
+        private val hits = mutableMapOf<String, MutableList<Long>>()
+
+        @Synchronized
+        fun allow(senderHex: String): Boolean {
+            val now = System.currentTimeMillis()
+            val list = hits.getOrPut(senderHex) { mutableListOf() }
+            list.removeIf { now - it > 60_000 }
+            if (list.size >= MAX_PER_MIN) return false
+            list.add(now)
+            return true
+        }
+    }
+
     fun handleInbound(ctx: Context, senderPhone: String, envelope: ByteArray) {
         try {
             if (envelope.size < EnvelopeCrypto.HEADER_LEN + 2) {
@@ -33,6 +53,10 @@ object EnvelopeRouter {
             // look up the peer's public key first.
             val senderId = envelope.copyOfRange(1, 9)
             val senderHex = senderId.joinToString("") { "%02x".format(it) }
+            if (!InboundRateLimiter.allow(senderHex)) {
+                Log.w(TAG, "rate-limited inbound flood from $senderHex; dropped")
+                return
+            }
             val reg = try {
                 DispatchManager.registry()
             } catch (e: Exception) {

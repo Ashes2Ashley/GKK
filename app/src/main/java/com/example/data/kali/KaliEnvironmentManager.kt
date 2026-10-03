@@ -1,9 +1,14 @@
 package com.example.data.kali
 
+import android.Manifest
 import android.app.ActivityManager
 import android.content.Context
+import android.content.pm.PackageManager
 import android.location.LocationManager
 import android.os.Build
+import android.telephony.TelephonyManager
+import androidx.core.content.ContextCompat
+import com.example.data.voice.VoiceCallManager
 import com.example.data.dispatch.AgentExecutor
 import com.example.data.dispatch.AutomationEngine
 import com.example.data.dispatch.DispatchManager
@@ -94,6 +99,10 @@ object KaliEnvironmentManager {
     fun executeCommand(rawCommand: String) {
         val cmd = rawCommand.trim()
         if (cmd.isEmpty()) return
+        if (cmd.length > 2000) {
+            append(cmd.take(60) + "\u2026", "command too long (max 2000 chars)")
+            return
+        }
         if (cmd == "clear") {
             _terminalBuffer.value = emptyList()
             return
@@ -183,6 +192,15 @@ object KaliEnvironmentManager {
                     else -> "usage: agent on|off   (currently ${if (AgentExecutor.enabled) "ON" else "OFF"})"
                 }
             }
+            "call" -> {
+                val number = parts.getOrNull(1) ?: return "usage: call <number>"
+                call(number)
+            }
+            "hangup" -> hangup()
+            "mute" -> mute()
+            "speaker" -> speaker()
+            "calls" -> calls()
+            "comms" -> comms()
             else -> "unknown command: '${parts[0]}' — type 'help'. (Fiction was removed from this console.)"
         }
     }
@@ -373,6 +391,7 @@ object KaliEnvironmentManager {
 
     private fun dispatch(target: String, text: String): String {
         if (text.isBlank()) return "nothing to send"
+        if (text.toByteArray().size > 4000) return "message too long (max ~4000 bytes)"
         val dev = findDevice(target) ?: return "no such device: '$target' (try: devices)"
         val r = DispatchManager.dispatchText(dev, text)
         return r.fold(
@@ -439,6 +458,100 @@ object KaliEnvironmentManager {
         }
     }
 
+    private fun call(number: String): String {
+        val r = VoiceCallManager.placeCall(number)
+        return r.fold(
+            onSuccess = { "calling $number \u2026 (overlay appears if permitted)" },
+            onFailure = { e -> "call failed: ${e.message}" }
+        )
+    }
+
+    private fun hangup(): String {
+        val r = VoiceCallManager.endCall()
+        return r.fold(
+            onSuccess = { "call ended" },
+            onFailure = { e -> "hangup failed: ${e.message}" }
+        )
+    }
+
+    private fun mute(): String {
+        val to = !VoiceCallManager.isMuted()
+        return VoiceCallManager.setMuted(to).fold(
+            onSuccess = { if (to) "microphone muted" else "microphone live" },
+            onFailure = { e -> "mute failed: ${e.message}" }
+        )
+    }
+
+    private fun speaker(): String {
+        val to = !VoiceCallManager.isSpeakerOn()
+        return VoiceCallManager.setSpeaker(to).fold(
+            onSuccess = { if (to) "speaker on" else "speaker off" },
+            onFailure = { e -> "speaker failed: ${e.message}" }
+        )
+    }
+
+    private fun calls(): String {
+        val r = VoiceCallManager.recentCalls(10)
+        return r.fold(
+            onSuccess = { list ->
+                if (list.isEmpty()) "no recent calls"
+                else {
+                    val fmt = SimpleDateFormat("MM-dd HH:mm", Locale.US)
+                    list.joinToString("\n") {
+                        "${fmt.format(Date(it.date))}  ${it.type}  ${it.number}  (${it.durationSec}s)"
+                    }
+                }
+            },
+            onFailure = { e -> "call log unavailable: ${e.message}" }
+        )
+    }
+
+    /**
+     * Prefilled, confirmed SMS configuration report. Everything here is
+     * baked in or probed live - nothing to configure by hand.
+     */
+    private fun comms(): String {
+        val c = ctx()
+        fun perm(p: String) =
+            ContextCompat.checkSelfPermission(c, p) == PackageManager.PERMISSION_GRANTED
+        val tm = c.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+        val simReady = try {
+            tm?.simState == TelephonyManager.SIM_STATE_READY
+        } catch (e: Exception) {
+            false
+        }
+        val recvRegistered = c.packageManager.queryBroadcastReceivers(
+            android.content.Intent("android.intent.action.DATA_SMS_RECEIVED"), 0
+        ).any { it.activityInfo?.name?.contains("SmsEnvelopeReceiver") == true }
+        val paired = try {
+            DispatchManager.registry().all().size
+        } catch (e: Exception) {
+            -1
+        }
+        val ident = try {
+            EnvelopeCrypto.deviceIdHex(DeviceKeys.getOrCreateIdentity().public)
+        } catch (e: Exception) {
+            "unavailable: ${e.message}"
+        }
+        val ok = { b: Boolean -> if (b) "CONFIRMED" else "MISSING" }
+        return buildString {
+            appendLine("== SMS bearer - prefilled configuration ==")
+            appendLine("SEND_SMS permission:    ${ok(perm(Manifest.permission.SEND_SMS))}")
+            appendLine("RECEIVE_SMS permission: ${ok(perm(Manifest.permission.RECEIVE_SMS))}")
+            appendLine("SIM state:              ${if (simReady) "READY" else "NOT READY - SMS needs a SIM"}")
+            appendLine("data-SMS receiver:      ${if (recvRegistered) "registered" else "NOT FOUND"}")
+            appendLine("port:                   19841 (built-in, both ends)")
+            appendLine("segments:               128 bytes (10 header + 118 payload)")
+            appendLine("envelope:               v1 ECDH+HKDF+AES-256-GCM, anti-replay")
+            appendLine("paired peers:           ${if (paired >= 0) paired else "registry unavailable"}")
+            appendLine("identity:               $ident")
+            appendLine("== voice ==")
+            appendLine("CALL_PHONE:             ${ok(perm(Manifest.permission.CALL_PHONE))}")
+            appendLine("call state:             ${VoiceCallManager.callState.value}")
+            append("overlay permission:     ${if (android.provider.Settings.canDrawOverlays(c)) "granted" else "not granted - overlay disabled"}")
+        }.toString()
+    }
+
     private fun beacon(): String {
         val c = ctx()
         val loc = try {
@@ -491,6 +604,12 @@ object KaliEnvironmentManager {
             heartbeats           fleet proof-of-life board
             beacon               encrypted SOS + GPS → all paired
             agent on|off         allow paired devices to run commands here
+            ── voice ─────────────────────────────
+            call <number>        real carrier voice call
+            hangup               end the current call
+            mute / speaker       toggle mic mute / speakerphone
+            calls                recent call log (real)
+            comms                SMS+voice prefilled config self-check
             ── observe ─────────────────────────────
             monitors             list the 15 live monitors
             monitor <name>       current reading of one monitor

@@ -7,7 +7,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
+import android.telephony.PhoneNumberUtils
 import android.telephony.SmsManager
+import android.telephony.TelephonyManager
 import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -96,6 +98,23 @@ object DataSmsTransport {
     fun sendSegments(phoneNumber: String, data: ByteArray): Int {
         val ctx = appCtx ?: throw IllegalStateException("DataSmsTransport not initialized")
         require(phoneNumber.isNotBlank()) { "empty destination number" }
+        require(PhoneNumberUtils.isGlobalPhoneNumber(phoneNumber)) {
+            "not a valid phone number: $phoneNumber"
+        }
+        // Fail fast with a clear reason instead of a silent radio error.
+        val tm = ctx.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+        if (tm != null) {
+            try {
+                val st = tm.simState
+                if (st != TelephonyManager.SIM_STATE_READY) {
+                    throw IllegalStateException(
+                        "SIM not ready (state=$st) - cannot send SMS. Insert a SIM / disable airplane mode."
+                    )
+                }
+            } catch (e: SecurityException) {
+                Log.w(TAG, "cannot read SIM state (no READ_PHONE_STATE); attempting send anyway")
+            }
+        }
         val msgId = ByteArray(8).also { SecureRandom().nextBytes(it) }
         val segments = SmsSegmenter.segment(msgId, data)
         val sm = smsManager(ctx)
