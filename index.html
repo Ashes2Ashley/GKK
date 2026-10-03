@@ -22,19 +22,39 @@ body { margin:0; background:var(--bg); color:var(--fg); font-family:ui-monospace
 .dim { color:var(--dim); } .acc { color:var(--acc); } .warn { color:var(--warn); } .err { color:var(--err); }
 #mon { border-top:1px dashed var(--dim); margin-top:8px; padding-top:8px; display:none; }
 video { max-width:100%; border:1px solid var(--dim); }
+.vbtn { background:transparent; border:1px solid var(--dim); color:var(--dim); border-radius:10px; padding:2px 10px; font:inherit; font-size:12px; cursor:pointer; }
+.vbtn.on { color:var(--acc); border-color:var(--acc); }
+#dash { display:none; overflow-y:auto; padding:14px; }
+#dashsearch { width:100%; background:transparent; border:1px solid var(--dim); color:var(--fg); font:inherit; padding:10px 12px; border-radius:8px; margin-bottom:6px; outline:none; }
+#dashresult { display:none; border:1px solid var(--acc); border-radius:8px; padding:10px 12px; margin-bottom:12px; white-space:pre-wrap; word-break:break-word; }
+#dashresult button { background:transparent; border:1px solid var(--dim); color:var(--fg); border-radius:6px; font:inherit; font-size:12px; cursor:pointer; margin-left:6px; }
+.dash-cat { color:var(--acc); font-size:13px; margin:16px 0 8px; }
+.dash-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:8px; }
+.card { border:1px solid var(--dim); border-radius:10px; padding:10px 12px; cursor:pointer; }
+.card:hover { border-color:var(--acc); }
+.card .ci { font-size:20px; }
+.card .cn { color:var(--acc); font-size:13px; margin:4px 0 2px; }
+.card .cd { color:var(--dim); font-size:11px; line-height:1.35; }
+.card .cc { color:var(--dim); font-size:10px; opacity:0.7; }
 @media (max-width:700px){ #side{ display:none; } }
 </style>
 </head>
 <body>
 <div id="head">
   <b>GKK/WEB</b><span class="dim">encrypted dispatch console</span>
+  <span><button class="vbtn on" id="btn-dash">Dashboard</button> <button class="vbtn" id="btn-term">Terminal</button></span>
   <span class="pill" id="h-id">no identity</span>
   <span class="pill" id="h-rtc">rtc: down</span>
   <span class="pill" id="h-peers">peers: 0</span>
 </div>
 <div id="wrap">
   <div style="flex:1;display:flex;flex-direction:column;min-width:0">
-    <div id="term"></div>
+    <div id="dash">
+      <input id="dashsearch" autocomplete="off" spellcheck="false" placeholder="Search 200 tools... try 'password', 'photo', 'timer'">
+      <div id="dashresult"></div>
+      <div id="dashgrid"></div>
+    </div>
+    <div id="term" style="display:none"></div>
     <div id="mon"></div>
     <div id="inrow"><span id="ps1">gkk&gt;</span><input id="cmd" autocomplete="off" spellcheck="false" placeholder="type 'help'"></div>
   </div>
@@ -1084,11 +1104,1550 @@ cmd("reset", "usage: reset yes — wipe everything", async (a) => {
     refreshHead();
     print('<span class="acc">GKK/Web</span> <span class="dim">— encrypted dispatch console (Envelope v1, byte-exact with Android)</span>');
     println("identity " + S.idHex.slice(0, 16) + "…  words: " + S.words);
-    println("100 features — type 'help'. Data links: rtcoffer <peer> / rtcanswer / rtcaccept. Calls: vcoffer <peer> [--video].");
+    println("200 features — type 'help'. Data links: rtcoffer <peer> / rtcanswer / rtcaccept. Calls: vcoffer <peer> [--video].");
   } catch (e) {
     print("init failed: " + e.message + " (private mode? IndexedDB is required)", "err");
   }
 })();
+</script>
+<script>
+"use strict";
+/* ---------- shared helpers for new tools ---------- */
+function downloadBlob(blob, name) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+}
+function beep(freq, secs) {
+  freq = freq || 880; secs = secs || 0.15;
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.connect(g); g.connect(ctx.destination);
+  o.frequency.value = freq; g.gain.setValueAtTime(0.2, ctx.currentTime);
+  o.start(); o.stop(ctx.currentTime + secs);
+}
+function b32decode(str) {
+  const alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  const clean = str.toUpperCase().replace(/=+$/, "").replace(/\s/g, "");
+  let bits = 0, val = 0; const out = [];
+  for (const ch of clean) {
+    const v = alpha.indexOf(ch);
+    if (v < 0) throw new Error("bad base32 character: " + ch);
+    val = (val << 5) | v; bits += 5;
+    if (bits >= 8) { out.push((val >>> (bits - 8)) & 255); bits -= 8; }
+  }
+  return new Uint8Array(out);
+}
+function b64urlDecode(s) {
+  s = s.replace(/-/g, "+").replace(/_/g, "/");
+  while (s.length % 4) s += "=";
+  return b64d(s);
+}
+
+/* ---------- Crypto+ (12) ---------- */
+cmd("passphrase", "make a strong easy-to-remember password from random words", async (a) => {
+  const n = Math.min(12, Math.max(2, parseInt(a[0] || "5", 10) || 5));
+  const words = [], rnd = crypto.getRandomValues(new Uint8Array(n));
+  for (let i = 0; i < n; i++) words.push(GkkCrypto.WORDS[rnd[i]]);
+  println(words.join("-") + "\n(" + (n * 8) + " bits of randomness)");
+});
+cmd("totp", "make a 6-digit login code from your secret key (like Authenticator apps)", async (a) => {
+  if (!a[0]) throw new Error("usage: totp <base32-secret>");
+  const key = await crypto.subtle.importKey("raw", b32decode(a[0]), { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
+  const ctr = Math.floor(Date.now() / 30000);
+  const msg = new Uint8Array(8); new DataView(msg.buffer).setBigUint64(0, BigInt(ctr));
+  const h = new Uint8Array(await crypto.subtle.sign("HMAC", key, msg));
+  const off = h[h.length - 1] & 15;
+  const code = ((h[off] & 127) << 24 | h[off + 1] << 16 | h[off + 2] << 8 | h[off + 3]) % 1000000;
+  const left = 30 - Math.floor(Date.now() / 1000) % 30;
+  println(String(code).padStart(6, "0") + "  (expires in " + left + "s)");
+});
+cmd("pbkdf2", "turn a password into a strong key (shows how key stretching works)", async (a) => {
+  if (a.length < 1) throw new Error("usage: pbkdf2 <password> [rounds]");
+  const rounds = Math.min(500000, Math.max(1000, parseInt(a[1] || "100000", 10) || 100000));
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const km = await crypto.subtle.importKey("raw", utf8(a[0]), "PBKDF2", false, ["deriveBits"]);
+  const t0 = performance.now();
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations: rounds }, km, 256);
+  println("key: " + hex(new Uint8Array(bits)) + "\nsalt: " + hex(salt) + "\n" + rounds + " rounds in " + Math.round(performance.now() - t0) + "ms");
+});
+cmd("esign", "sign a message so others can prove it came from you", async (a) => {
+  const text = a.join(" "); if (!text) throw new Error("usage: esign <message>");
+  const kp = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+  const sig = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, kp.privateKey, utf8(text));
+  const pub = b64e(new Uint8Array(await crypto.subtle.exportKey("spki", kp.publicKey)));
+  println("signature: " + b64e(new Uint8Array(sig)) + "\npublic key: " + pub + "\ncheck it with: everify <public-key> <signature> " + text);
+});
+cmd("everify", "check a signed message is real and untouched", async (a) => {
+  if (a.length < 3) throw new Error("usage: everify <public-key-b64> <signature-b64> <message>");
+  const pub = await crypto.subtle.importKey("spki", b64d(a[0]), { name: "ECDSA", namedCurve: "P-256" }, true, ["verify"]);
+  const ok = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, pub, b64d(a[1]), utf8(a.slice(2).join(" ")));
+  print(ok ? '<span class="acc">signature VALID</span>' : '<span class="err">signature INVALID</span>');
+});
+cmd("jwtdecode", "peek inside a login token to see what it contains", async (a) => {
+  if (!a[0]) throw new Error("usage: jwtdecode <token>");
+  const p = a[0].split(".");
+  if (p.length !== 3) throw new Error("not a JWT (need 3 dot-separated parts)");
+  const td = new TextDecoder();
+  println("header: " + td.decode(b64urlDecode(p[0])) + "\nbody: " + JSON.stringify(JSON.parse(td.decode(b64urlDecode(p[1]))), null, 2) + "\n(note: this shows contents only — it does NOT check the signature)");
+});
+cmd("lock", "lock text with a password so only the password opens it", async (a, line) => {
+  const sp = line.indexOf(" ");
+  const rest = sp < 0 ? "" : line.slice(sp + 1);
+  const i = rest.indexOf(" ");
+  if (i < 0) throw new Error("usage: lock <password> <secret text>");
+  const pw = rest.slice(0, i), text = rest.slice(i + 1);
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const km = await crypto.subtle.importKey("raw", utf8(pw), "PBKDF2", false, ["deriveKey"]);
+  const key = await crypto.subtle.deriveKey({ name: "PBKDF2", hash: "SHA-256", salt, iterations: 200000 }, km, { name: "AES-GCM", length: 256 }, false, ["encrypt"]);
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, utf8(text));
+  const payload = b64e(utf8(JSON.stringify({ v: 1, salt: b64e(salt), iv: b64e(iv), ct: b64e(new Uint8Array(ct)) })));
+  println(payload + "\nopen it with: unlock <password> <this text>");
+});
+cmd("unlock", "open text that was locked with a password", async (a, line) => {
+  const sp = line.indexOf(" ");
+  const rest = sp < 0 ? "" : line.slice(sp + 1);
+  const i = rest.indexOf(" ");
+  if (i < 0) throw new Error("usage: unlock <password> <locked text>");
+  const pw = rest.slice(0, i);
+  let env;
+  try { env = JSON.parse(new TextDecoder().decode(b64d(rest.slice(i + 1).replace(/\s/g, "")))); }
+  catch (e) { throw new Error("that does not look like locked text"); }
+  const km = await crypto.subtle.importKey("raw", utf8(pw), "PBKDF2", false, ["deriveKey"]);
+  const key = await crypto.subtle.deriveKey({ name: "PBKDF2", hash: "SHA-256", salt: b64d(env.salt), iterations: 200000 }, km, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+  try {
+    const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64d(env.iv) }, key, b64d(env.ct));
+    println(new TextDecoder().decode(pt));
+  } catch (e) { throw new Error("wrong password or damaged text"); }
+});
+cmd("entropy", "guess how hard a password is to crack", async (a) => {
+  const pw = a.join(" "); if (!pw) throw new Error("usage: entropy <password>");
+  let pool = 0;
+  if (/[a-z]/.test(pw)) pool += 26;
+  if (/[A-Z]/.test(pw)) pool += 26;
+  if (/[0-9]/.test(pw)) pool += 10;
+  if (/[^a-zA-Z0-9]/.test(pw)) pool += 32;
+  const bits = Math.round(pw.length * Math.log2(pool || 1));
+  const verdict = bits < 40 ? "weak" : bits < 60 ? "okay" : bits < 80 ? "strong" : "very strong";
+  println(bits + " bits — " + verdict + " (rough estimate, assumes random characters)");
+});
+cmd("certinfo", "look up a website's public security certificates", async (a) => {
+  if (!a[0]) throw new Error("usage: certinfo <domain>");
+  const dom = a[0].replace(/^https?:\/\//, "").split("/")[0];
+  let r;
+  try { r = await fetch("https://crt.sh/?q=" + encodeURIComponent(dom) + "&output=json"); }
+  catch (e) { throw new Error("certificate lookup unreachable (offline?)"); }
+  if (!r.ok) throw new Error("lookup failed: HTTP " + r.status);
+  const j = await r.json();
+  if (!j.length) { println("no certificates found for " + dom); return; }
+  const latest = j[0];
+  println(j.length + " cert(s) found. Latest:\nissuer: " + latest.issuer_name + "\nvalid: " + latest.not_before + " to " + latest.not_after + "\nnames: " + latest.name_value.split("\n").slice(0, 5).join(", "));
+});
+cmd("hmacfile", "fingerprint a file with a secret key (proves it was not changed)", async (a) => {
+  if (!a[0] || a[0].length < 8) throw new Error("usage: hmacfile <key-hex>  (then pick a file)");
+  const kb = new Uint8Array(a[0].length / 2);
+  for (let i = 0; i < kb.length; i++) kb[i] = parseInt(a[0].slice(i * 2, i * 2 + 2), 16);
+  const f = await pickFile();
+  const data = new Uint8Array(await f.arrayBuffer());
+  const k = await crypto.subtle.importKey("raw", kb, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  println(f.name + " (" + data.length + " bytes)\nhmac: " + hex(new Uint8Array(await crypto.subtle.sign("HMAC", k, data))));
+});
+cmd("wrapdemo", "watch a key get locked inside another key (key wrapping)", async () => {
+  const inner = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt"]);
+  const wrap = await crypto.subtle.generateKey({ name: "AES-KW", length: 256 }, true, ["wrapKey", "unwrapKey"]);
+  const wrapped = await crypto.subtle.wrapKey("raw", inner, wrap, "AES-KW");
+  const back = await crypto.subtle.unwrapKey("raw", wrapped, wrap, "AES-KW", { name: "AES-GCM", length: 256 }, true, ["encrypt"]);
+  const a1 = hex(new Uint8Array(await crypto.subtle.exportKey("raw", inner)));
+  const a2 = hex(new Uint8Array(await crypto.subtle.exportKey("raw", back)));
+  print(a1 === a2 ? '<span class="acc">wrap + unwrap round-trip OK</span> — the inner key survived' : '<span class="err">MISMATCH</span>');
+});
+</script>
+<script>
+"use strict";
+/* ---------- Text & data (16) ---------- */
+cmd("wordcount", "count words, characters and lines in some text", async (a) => {
+  const t = a.join(" "); if (!t) throw new Error("usage: wordcount <text>");
+  const words = t.trim().split(/\s+/).filter(Boolean).length;
+  println("words: " + words + "\ncharacters: " + t.length + " (no spaces: " + t.replace(/\s/g, "").length + ")\nlines: " + t.split("\n").length);
+});
+cmd("jsonfmt", "tidy up messy JSON so it is easy to read", async (a, line) => {
+  const j = line.slice(line.indexOf(" ") + 1);
+  if (!j.trim()) throw new Error("usage: jsonfmt <json>");
+  try { println(JSON.stringify(JSON.parse(j), null, 2)); }
+  catch (e) { throw new Error("not valid JSON: " + e.message); }
+});
+function parseCSV(text) {
+  const rows = []; let row = [], cur = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) {
+      if (ch === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; }
+      else cur += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === ",") { row.push(cur); cur = ""; }
+    else if (ch === "\n" || ch === "\r") { if (cur !== "" || row.length) { row.push(cur); rows.push(row); row = []; cur = ""; } if (ch === "\r" && text[i + 1] === "\n") i++; }
+    else cur += ch;
+  }
+  if (cur !== "" || row.length) { row.push(cur); rows.push(row); }
+  return rows;
+}
+function toCSV(rows) {
+  return rows.map((r) => r.map((c) => /[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c).join(",")).join("\n");
+}
+cmd("json2csv", "turn a list of objects into spreadsheet rows", async (a, line) => {
+  const j = line.slice(line.indexOf(" ") + 1);
+  let arr;
+  try { arr = JSON.parse(j); } catch (e) { throw new Error("not valid JSON"); }
+  if (!Array.isArray(arr) || !arr.length) throw new Error("need a JSON array like [{\"a\":1}]");
+  const keys = [...new Set(arr.flatMap((o) => Object.keys(o)))];
+  println(toCSV([keys, ...arr.map((o) => keys.map((k) => String(o[k] === undefined ? "" : o[k])))]));
+});
+cmd("csv2json", "turn spreadsheet rows into a list of objects", async (a, line) => {
+  const t = line.slice(line.indexOf(" ") + 1);
+  const rows = parseCSV(t);
+  if (rows.length < 2) throw new Error("need a header row plus data rows");
+  const [head, ...body] = rows;
+  println(JSON.stringify(body.map((r) => Object.fromEntries(head.map((h, i) => [h, r[i] === undefined ? "" : r[i]]))), null, 2));
+});
+cmd("regextest", "try a search pattern against text and see what matches", async (a, line) => {
+  if (a.length < 2) throw new Error("usage: regextest <pattern> <text>");
+  const pat = a[0];
+  const text = line.slice(line.indexOf(pat) + pat.length + 1);
+  let re;
+  try { re = new RegExp(pat, "g"); } catch (e) { throw new Error("bad pattern: " + e.message); }
+  const hits = [...text.matchAll(re)].map((m) => m[0]);
+  println(hits.length ? hits.length + " match(es):\n" + hits.slice(0, 20).join("\n") : "no matches");
+});
+cmd("textdiff", "show what changed between two blocks of text (use | to separate)", async (a, line) => {
+  const body = line.slice(line.indexOf(" ") + 1);
+  const i = body.indexOf(" | ");
+  if (i < 0) throw new Error("usage: textdiff <old> | <new>");
+  const A = body.slice(0, i).split("\n"), B = body.slice(i + 3).split("\n");
+  const m = A.length, n = B.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let x = m - 1; x >= 0; x--) for (let y = n - 1; y >= 0; y--)
+    dp[x][y] = A[x] === B[y] ? dp[x + 1][y + 1] + 1 : Math.max(dp[x + 1][y], dp[x][y + 1]);
+  let x = 0, y = 0; const out = [];
+  while (x < m && y < n) {
+    if (A[x] === B[y]) { x++; y++; }
+    else if (dp[x + 1][y] >= dp[x][y + 1]) { out.push('<span class="err">- ' + esc(A[x++]) + "</span>"); }
+    else { out.push('<span class="acc">+ ' + esc(B[y++]) + "</span>"); }
+  }
+  while (x < m) out.push('<span class="err">- ' + esc(A[x++]) + "</span>");
+  while (y < n) out.push('<span class="acc">+ ' + esc(B[y++]) + "</span>");
+  print(out.join("<br>") || '<span class="dim">no differences</span>');
+});
+cmd("fileb64e", "turn a file into text you can paste anywhere", async () => {
+  const f = await pickFile();
+  const b = new Uint8Array(await f.arrayBuffer());
+  println(f.name + " (" + b.length + " bytes)\n" + b64e(b));
+});
+cmd("fileb64d", "turn pasted file-text back into a downloadable file", async (a) => {
+  if (!a[0]) throw new Error("usage: fileb64d <base64> [filename]");
+  const name = a[1] || "decoded.bin";
+  try { downloadBlob(new Blob([b64d(a[0].replace(/\s/g, ""))]), name); println("downloaded " + name); }
+  catch (e) { throw new Error("not valid base64"); }
+});
+cmd("urlencode", "make text safe to put in a web address", async (a) => {
+  const t = a.join(" "); if (!t) throw new Error("usage: urlencode <text>");
+  println(encodeURIComponent(t));
+});
+cmd("urldecode", "turn a web address back into readable text", async (a) => {
+  const t = a.join(" "); if (!t) throw new Error("usage: urldecode <text>");
+  try { println(decodeURIComponent(t.replace(/\+/g, " "))); }
+  catch (e) { throw new Error("not valid encoded text"); }
+});
+cmd("htmlesc", "make text safe to paste into a web page", async (a) => {
+  const t = a.join(" "); if (!t) throw new Error("usage: htmlesc <text>");
+  println(esc(t));
+});
+cmd("mdpreview", "turn simple markdown into a formatted preview", async (a, line) => {
+  let t = line.slice(line.indexOf(" ") + 1);
+  if (!t.trim()) throw new Error("usage: mdpreview <markdown>");
+  t = esc(t);
+  const blocks = [];
+  t = t.replace(/```([\s\S]*?)```/g, (m, c) => { blocks.push("<pre>" + c + "</pre>"); return "\u0000" + (blocks.length - 1); });
+  t = t.replace(/^### (.*)$/gm, "<h3>$1</h3>").replace(/^## (.*)$/gm, "<h2>$1</h2>").replace(/^# (.*)$/gm, "<h1>$1</h1>");
+  t = t.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/\*([^*]+)\*/g, "<i>$1</i>").replace(/`([^`]+)`/g, "<code>$1</code>");
+  t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>').replace(/^&gt; (.*)$/gm, "<blockquote>$1</blockquote>");
+  t = t.replace(/^(?:-|\*) (.*)$/gm, "<li>$1</li>").replace(/(<li>.*<\/li>\n?)+/g, "<ul>$&</ul>");
+  t = t.replace(/\u0000(\d+)/g, (m, i) => blocks[+i]).replace(/\n/g, "<br>");
+  print('<div style="border:1px solid var(--dim);border-radius:8px;padding:10px">' + t + "</div>");
+});
+cmd("lorem", "fill a page with placeholder latin text", async (a) => {
+  const n = Math.min(10, Math.max(1, parseInt(a[0] || "3", 10) || 3));
+  const words = "lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua enim ad minim veniam quis nostrud exercitation ullamco laboris nisi aliquip ex ea commodo consequat".split(" ");
+  const rnd = crypto.getRandomValues(new Uint8Array(n * 40));
+  const paras = [];
+  for (let p = 0; p < n; p++) {
+    const w = [];
+    for (let i = 0; i < 40; i++) w.push(words[rnd[p * 40 + i] % words.length]);
+    paras.push(w.join(" ") + ".");
+  }
+  println(paras.join("\n\n"));
+});
+cmd("csvview", "pick a spreadsheet file and see it as a neat table", async () => {
+  const f = await pickFile();
+  const rows = parseCSV(await f.text()).slice(0, 21);
+  if (!rows.length) throw new Error("no rows found");
+  const widths = rows[0].map((_, i) => Math.min(28, Math.max(...rows.map((r) => (r[i] || "").length))));
+  const fmt = (r) => r.map((c, i) => (c || "").slice(0, widths[i]).padEnd(widths[i])).join(" | ");
+  println(f.name + "\n" + fmt(rows[0]) + "\n" + widths.map((w) => "-".repeat(w)).join("-+-") + "\n" + rows.slice(1).map(fmt).join("\n") + (rows.length === 21 ? "\n...(first 20 rows shown)" : ""));
+});
+cmd("textstats", "reading level and vocabulary stats for some text", async (a) => {
+  const t = a.join(" "); if (!t) throw new Error("usage: textstats <text>");
+  const words = t.toLowerCase().match(/[a-z']+/g) || [];
+  const sents = t.split(/[.!?]+/).filter((s) => s.trim().length);
+  const uniq = new Set(words).size;
+  const avgW = words.length / Math.max(1, sents.length);
+  println("words: " + words.length + "  unique: " + uniq + "  sentences: " + sents.length +
+    "\navg words/sentence: " + avgW.toFixed(1) + "\nunique ratio: " + (100 * uniq / Math.max(1, words.length)).toFixed(0) + "%");
+});
+cmd("caseconv", "switch text between UPPER, lower, Title and camelCase", async (a) => {
+  if (a.length < 2) throw new Error("usage: caseconv <upper|lower|title|camel|snake> <text>");
+  const mode = a[0].toLowerCase(), t = a.slice(1).join(" ");
+  const words = t.split(/[\s_\-]+/).filter(Boolean);
+  let out = t;
+  if (mode === "upper") out = t.toUpperCase();
+  else if (mode === "lower") out = t.toLowerCase();
+  else if (mode === "title") out = words.map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+  else if (mode === "camel") out = words.map((w, i) => i ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w.toLowerCase()).join("");
+  else if (mode === "snake") out = words.map((w) => w.toLowerCase()).join("_");
+  else throw new Error("pick upper, lower, title, camel or snake");
+  println(out);
+});
+</script>
+<script>
+"use strict";
+/* ---------- Network++ (12) ---------- */
+cmd("wstest", "check if a live socket address answers (then say hello)", async (a) => {
+  if (!a[0]) throw new Error("usage: wstest <wss://url> [message]");
+  const url = a[0], msg = a.slice(1).join(" ") || "hello";
+  const res = await new Promise((resolve) => {
+    let ws;
+    try { ws = new WebSocket(url); } catch (e) { resolve("bad URL: " + e.message); return; }
+    const t = setTimeout(() => { try { ws.close(); } catch (e) {} resolve("connected, but no reply within 10s"); }, 10000);
+    ws.onopen = () => ws.send(msg);
+    ws.onmessage = (e) => { clearTimeout(t); resolve("reply received: " + String(e.data).slice(0, 300)); try { ws.close(); } catch (x) {} };
+    ws.onerror = () => { clearTimeout(t); resolve("could not connect (wrong address or blocked)"); };
+  });
+  println(res);
+});
+cmd("corscheck", "see if a website lets other sites read it", async (a) => {
+  if (!a[0]) throw new Error("usage: corscheck <url>");
+  try {
+    const r = await fetch(a[0], { method: "GET" });
+    await r.text();
+    println("CORS ALLOWED — this site can be read from any web page (HTTP " + r.status + ")");
+  } catch (e) {
+    println("CORS BLOCKED — browsers refuse to read this site from other pages (" + e.message + ")");
+  }
+});
+cmd("redirtrace", "see where a short link really ends up", async (a) => {
+  if (!a[0]) throw new Error("usage: redirtrace <url>");
+  try {
+    const r = await fetch(a[0], { method: "HEAD" });
+    println("you asked for: " + a[0] + "\nyou landed on: " + r.url + "\nredirected: " + (r.redirected ? "yes" : "no") + "  (HTTP " + r.status + ")");
+  } catch (e) { throw new Error("unreachable: " + e.message); }
+});
+cmd("secheaders", "grade a website's security setup", async (a) => {
+  if (!a[0]) throw new Error("usage: secheaders <url>");
+  let r;
+  try { r = await fetch(a[0], { method: "HEAD" }); }
+  catch (e) { throw new Error("unreachable or CORS-blocked: " + e.message); }
+  const checks = [
+    ["strict-transport-security", "forces HTTPS"],
+    ["content-security-policy", "blocks injected scripts"],
+    ["x-frame-options", "stops clickjacking"],
+    ["x-content-type-options", "stops mime sniffing"],
+    ["referrer-policy", "controls referrer leaks"],
+    ["permissions-policy", "limits browser features"]
+  ];
+  let score = 0;
+  const lines = checks.map(([h, why]) => {
+    const v = r.headers.get(h);
+    if (v) { score++; return "[+] " + h + " — " + why; }
+    return "[ ] " + h + " — missing (" + why + ")";
+  });
+  println(lines.join("\n") + "\nscore: " + score + "/" + checks.length);
+});
+cmd("dohcf", "look up a domain using Cloudflare's directory", async (a) => {
+  if (!a[0]) throw new Error("usage: dohcf <name> [type]");
+  const r = await fetch("https://cloudflare-dns.com/dns-query?name=" + encodeURIComponent(a[0]) + "&type=" + encodeURIComponent(a[1] || "A"),
+    { headers: { "Accept": "application/dns-json" } });
+  if (!r.ok) throw new Error("lookup failed: HTTP " + r.status);
+  const j = await r.json();
+  println(((j.Answer || []).map((x) => x.name + "  " + x.type + "  " + x.data).join("\n")) || "(no answers)");
+});
+cmd("reqbuilder", "send a custom web request with your own headers", async (a, line) => {
+  if (a.length < 2) throw new Error("usage: reqbuilder <METHOD> <url> [H:Name: value] [B:body text]");
+  const method = a[0].toUpperCase(), url = a[1];
+  const headers = {}; let body = null;
+  const rest = line.slice(line.indexOf(url) + url.length + 1);
+  const bIdx = rest.indexOf(" B:");
+  let hPart = rest, bPart = null;
+  if (bIdx >= 0) { hPart = rest.slice(0, bIdx); bPart = rest.slice(bIdx + 3); }
+  hPart.split(/\s+H:/).forEach((h) => {
+    const i = h.indexOf(":");
+    if (i > 0) headers[h.slice(0, i).trim()] = h.slice(i + 1).trim();
+  });
+  if (bPart) body = bPart;
+  const t0 = performance.now();
+  try {
+    const r = await fetch(url, { method, headers, body });
+    const txt = await r.text();
+    println(method + " " + url + " -> HTTP " + r.status + " (" + Math.round(performance.now() - t0) + "ms)\n" + txt.slice(0, 1500));
+  } catch (e) { throw new Error("request failed: " + e.message); }
+});
+cmd("restimer", "time how fast a page answers, in detail", async (a) => {
+  if (!a[0]) throw new Error("usage: restimer <url>");
+  const t0 = performance.now();
+  let r;
+  try { r = await fetch(a[0]); } catch (e) { throw new Error("unreachable: " + e.message); }
+  const tFirst = performance.now();
+  const buf = await r.arrayBuffer();
+  const tDone = performance.now();
+  println("HTTP " + r.status + "  " + (buf.byteLength / 1024).toFixed(1) + " KB\ntime to first byte: " + Math.round(tFirst - t0) + "ms\ntotal download: " + Math.round(tDone - t0) + "ms\nspeed: " + (buf.byteLength / Math.max(1, tDone - tFirst) * 1000 / 1048576).toFixed(1) + " MB/s");
+});
+cmd("uaparse", "figure out what browser and device a user-agent string is", async (a) => {
+  const ua = a.join(" ") || navigator.userAgent;
+  let browser = "unknown", os = "unknown";
+  if (/Edg\//.test(ua)) browser = "Edge";
+  else if (/Chrome\//.test(ua)) browser = "Chrome";
+  else if (/Safari\//.test(ua) && !/Chrome/.test(ua)) browser = "Safari";
+  else if (/Firefox\//.test(ua)) browser = "Firefox";
+  else if (/MSIE|Trident/.test(ua)) browser = "Internet Explorer";
+  if (/Windows NT/.test(ua)) os = "Windows";
+  else if (/Mac OS X/.test(ua)) os = /iPhone|iPad/.test(ua) ? "iOS" : "macOS";
+  else if (/Android/.test(ua)) os = "Android";
+  else if (/Linux/.test(ua)) os = "Linux";
+  const mobile = /Mobile|Android|iPhone|iPad/.test(ua) ? "yes" : "no";
+  println("browser: " + browser + "\nsystem: " + os + "\nmobile: " + mobile);
+});
+cmd("subnet", "carve an address block into network, range and size", async (a) => {
+  if (!a[0]) throw new Error("usage: subnet <ip/prefix>  e.g. subnet 192.168.1.10/24");
+  const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)\/(\d+)$/.exec(a[0]);
+  if (!m) throw new Error("use dotted form like 192.168.1.10/24");
+  const oct = m.slice(1, 5).map(Number), pre = +m[5];
+  if (oct.some((o) => o < 0 || o > 255) || pre < 0 || pre > 32) throw new Error("bad address or prefix");
+  const ip = ((oct[0] << 24) | (oct[1] << 16) | (oct[2] << 8) | oct[3]) >>> 0;
+  const mask = pre === 0 ? 0 : (0xFFFFFFFF << (32 - pre)) >>> 0;
+  const net = (ip & mask) >>> 0, bcast = (net | ~mask) >>> 0;
+  const f = (n) => [24, 16, 8, 0].map((s) => (n >>> s) & 255).join(".");
+  const hosts = pre >= 31 ? (1 << (32 - pre)) : (1 << (32 - pre)) - 2;
+  println("network: " + f(net) + "\nmask: " + f(mask) + "\nbroadcast: " + f(bcast) +
+    "\nusable range: " + f(net + 1) + " - " + f(bcast - 1) + "\nhosts: " + hosts);
+});
+cmd("macvendor", "find which company made a network card", async (a) => {
+  if (!a[0]) throw new Error("usage: macvendor <AA:BB:CC:DD:EE:FF>");
+  const mac = a[0].replace(/[^0-9a-fA-F]/g, "");
+  if (mac.length !== 12) throw new Error("need 12 hex digits");
+  try {
+    const r = await fetch("https://api.macvendors.com/" + encodeURIComponent(a[0]));
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    println("maker: " + (await r.text()).trim());
+  } catch (e) { throw new Error("lookup failed (offline?): " + e.message); }
+});
+cmd("httpstatus", "what a web status code means, in plain words", async (a) => {
+  const codes = { 200: "OK — everything worked", 201: "Created — something new was made", 204: "No content — worked, nothing to send back", 301: "Moved forever — use the new address", 302: "Moved for now", 304: "Not changed — use your saved copy", 400: "Bad request — the address or data was wrong", 401: "Need to log in first", 403: "Not allowed, even logged in", 404: "Not found — wrong address", 408: "Took too long, timed out", 429: "Too many requests — slow down", 500: "Server messed up", 502: "Bad gateway — server got a bad answer upstream", 503: "Busy or down for maintenance", 504: "Gateway timed out" };
+  if (!a[0]) { println(Object.keys(codes).map((k) => k + ": " + codes[k]).join("\n")); return; }
+  println(codes[a[0]] ? a[0] + ": " + codes[a[0]] : "no plain-words entry for " + a[0]);
+});
+cmd("porthint", "guess if a port is open (a hint, not a real scan)", async (a) => {
+  if (a.length < 2) throw new Error("usage: porthint <host> <port>");
+  const host = a[0], port = parseInt(a[1], 10);
+  if (!port || port < 1 || port > 65535) throw new Error("port must be 1-65535");
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 8000);
+  const t0 = performance.now();
+  try {
+    await fetch("https://" + host + ":" + port + "/", { mode: "no-cors", signal: ctrl.signal });
+    println(host + ":" + port + " — answered in " + Math.round(performance.now() - t0) + "ms (something is listening; this is a hint, not a full scan)");
+  } catch (e) {
+    const ms = Math.round(performance.now() - t0);
+    println(host + ":" + port + " — " + (e.name === "AbortError" ? "no answer in 8s (filtered or slow)" : "refused fast (" + ms + "ms, likely closed)") + " — hint only");
+  } finally { clearTimeout(t); }
+});
+</script>
+<script>
+"use strict";
+/* ---------- System & browser+ (12) ---------- */
+cmd("cookies", "see what little notes websites left in your browser", async () => {
+  const all = document.cookie.split(";").map((c) => c.trim()).filter(Boolean);
+  if (!all.length) { println("no readable cookies (sites can hide theirs from scripts)"); return; }
+  println(all.map((c) => { const i = c.indexOf("="); return c.slice(0, i) + " = " + c.slice(i + 1).slice(0, 60); }).join("\n") + "\n(note: hidden HttpOnly cookies are not shown)");
+});
+cmd("lskeys", "peek at what this app saved in your browser (usage: lskeys [name])", async (a) => {
+  const keys = Object.keys(localStorage).filter((k) => k.startsWith("gkk."));
+  if (a[0]) {
+    const v = localStorage.getItem("gkk." + a[0]);
+    println(v === null ? "nothing saved under '" + a[0] + "'" : v.slice(0, 2000));
+    return;
+  }
+  println(keys.length ? keys.map((k) => k.slice(4) + " (" + (localStorage.getItem(k) || "").length + " chars)").join("\n") : "this app saved nothing yet");
+});
+cmd("sskeys", "peek at this tab's temporary storage (usage: sskeys [name])", async (a) => {
+  const keys = Object.keys(sessionStorage);
+  if (a[0]) {
+    const v = sessionStorage.getItem(a[0]);
+    println(v === null ? "nothing under '" + a[0] + "'" : String(v).slice(0, 2000));
+    return;
+  }
+  println(keys.length ? keys.map((k) => k + " (" + (sessionStorage.getItem(k) || "").length + " chars)").join("\n") : "temporary storage is empty");
+});
+cmd("idbkeys", "list the databases websites keep in your browser", async () => {
+  if (!indexedDB.databases) throw new Error("your browser does not let pages list databases");
+  const dbs = await indexedDB.databases();
+  if (!dbs.length) { println("no databases found"); return; }
+  const out = [];
+  for (const db of dbs) {
+    let stores = "?";
+    try {
+      const req = indexedDB.open(db.name);
+      const con = await new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = rej; req.onblocked = rej; });
+      stores = [...con.objectStoreNames].join(", ") || "(no tables)";
+      con.close();
+    } catch (e) { stores = "(locked)"; }
+    out.push(db.name + " v" + db.version + " [" + stores + "]");
+  }
+  println(out.join("\n"));
+});
+cmd("histlen", "how many pages are in your back-button history", async () => {
+  println(history.length + " page(s) in this tab's history");
+});
+cmd("plugins", "list browser add-ons the page can see", async () => {
+  const ps = [...navigator.plugins];
+  println(ps.length ? ps.map((p) => p.name + " — " + p.description).join("\n") : "none visible (modern browsers hide these)");
+});
+cmd("mimetypes", "list file types your browser knows how to open", async () => {
+  const ms = [...navigator.mimeTypes];
+  println(ms.length ? ms.slice(0, 40).map((m) => m.type + " -> " + m.description).join("\n") : "none listed");
+});
+cmd("devorient", "read which way your device is tilted right now", async () => {
+  const reading = await new Promise((resolve, reject) => {
+    const done = (a, b, g) => { window.removeEventListener("deviceorientation", h); resolve([a, b, g]); };
+    const h = (e) => done(e.alpha, e.beta, e.gamma);
+    const to = setTimeout(() => { window.removeEventListener("deviceorientation", h); reject(new Error("no reading in 8s (desktop?)")); }, 8000);
+    const start = () => window.addEventListener("deviceorientation", h, { once: true });
+    if (typeof DeviceOrientationEvent !== "undefined" && DeviceOrientationEvent.requestPermission) {
+      DeviceOrientationEvent.requestPermission().then((p) => p === "granted" ? start() : reject(new Error("tilt permission denied"))).catch(reject);
+    } else start();
+  });
+  const [a, b, g] = reading.map((v) => v === null ? "?" : Math.round(v));
+  println("compass: " + a + "°   front-back tilt: " + b + "°   left-right tilt: " + g + "°");
+});
+cmd("touchinfo", "does this screen respond to touch?", async () => {
+  println("touch points: " + navigator.maxTouchPoints + "\ntouch events: " + ("ontouchstart" in window ? "yes" : "no"));
+});
+cmd("pdfview", "open a PDF file right here to read it", async () => {
+  const f = await pickFile();
+  if (!/\.pdf$/i.test(f.name) && f.type !== "application/pdf") throw new Error("that does not look like a PDF");
+  const url = URL.createObjectURL(f);
+  print('<iframe src="' + url + '" style="width:100%;height:60vh;border:1px solid var(--dim)"></iframe><div class="dim">' + esc(f.name) + "</div>");
+});
+cmd("fontlist", "find out which text styles are installed here", async () => {
+  const test = ["Arial", "Helvetica", "Times New Roman", "Georgia", "Verdana", "Courier New", "Comic Sans MS", "Impact", "Trebuchet MS", "Palatino", "Garamond", "Tahoma", "Monaco", "Consolas", "Roboto", "Open Sans", "Segoe UI"];
+  const cv = document.createElement("canvas"), cx = cv.getContext("2d");
+  const probe = "mmmmmmmmmmlli";
+  cx.font = "72px monospace";
+  const base = cx.measureText(probe).width;
+  const found = test.filter((f) => { cx.font = '72px "' + f + '", monospace'; return cx.measureText(probe).width !== base; });
+  println(found.length ? found.join("\n") : "only generic fonts detected");
+});
+cmd("onoffinfo", "are you online, and how to fake going offline for testing", async () => {
+  const c = navigator.connection || {};
+  println("online: " + (navigator.online ? "yes" : "NO — you are offline") +
+    "\ntype: " + (c.effectiveType || "?") + "  speed: " + (c.downlink || "?") + " Mbps" +
+    "\ntip: in desktop Chrome open DevTools (F12) > Network tab > set 'Offline' to practice");
+});
+</script>
+<script>
+"use strict";
+/* ---------- Media (14) ---------- */
+function loadImageFile(f) {
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(f);
+    const img = new Image();
+    img.onload = () => res({ img, url });
+    img.onerror = () => rej(new Error("could not read that image"));
+    img.src = url;
+  });
+}
+cmd("imgresize", "shrink a photo to any size", async (a) => {
+  const w = parseInt(a[0], 10), h = parseInt(a[1], 10);
+  if (!w || !h || w > 8000 || h > 8000) throw new Error("usage: imgresize <width> <height>");
+  const f = await pickFile();
+  const { img, url } = await loadImageFile(f);
+  const cv = document.createElement("canvas");
+  cv.width = w; cv.height = h;
+  cv.getContext("2d").drawImage(img, 0, 0, w, h);
+  URL.revokeObjectURL(url);
+  cv.toBlob((b) => { downloadBlob(b, "resized-" + w + "x" + h + ".png"); println("downloaded resized-" + w + "x" + h + ".png"); }, "image/png");
+});
+cmd("imgconvert", "change a photo to PNG, JPG or WebP", async (a) => {
+  const fmt = (a[0] || "").toLowerCase();
+  const mime = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp" }[fmt];
+  if (!mime) throw new Error("usage: imgconvert <png|jpg|webp>");
+  const f = await pickFile();
+  const { img, url } = await loadImageFile(f);
+  const cv = document.createElement("canvas");
+  cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+  cv.getContext("2d").drawImage(img, 0, 0);
+  URL.revokeObjectURL(url);
+  cv.toBlob((b) => {
+    if (!b) throw new Error("your browser cannot make " + fmt);
+    const ext = fmt === "jpeg" ? "jpg" : fmt;
+    downloadBlob(b, f.name.replace(/\.[^.]+$/, "") + "." + ext);
+    println("downloaded as " + ext.toUpperCase());
+  }, mime, 0.92);
+});
+function parseExif(buf) {
+  const dv = new DataView(buf);
+  if (dv.getUint16(0) !== 0xFFD8) throw new Error("not a JPEG photo");
+  let off = 2;
+  while (off < dv.byteLength - 10) {
+    if (dv.getUint8(off) !== 0xFF) break;
+    const marker = dv.getUint8(off + 1), len = dv.getUint16(off + 2);
+    if (marker === 0xE1) {
+      const head = String.fromCharCode(...new Uint8Array(buf, off + 4, 6));
+      if (head === "Exif\u0000\u0000") return readIfd(dv, off + 10);
+      break;
+    }
+    if (marker === 0xDA || marker === 0xD9) break;
+    off += 2 + len;
+  }
+  throw new Error("no camera info found in this photo");
+}
+function readIfd(dv, tiff) {
+  const le = dv.getUint16(tiff) === 0x4949;
+  const g16 = (o) => dv.getUint16(o, le), g32 = (o) => dv.getUint32(o, le);
+  const tags = { 271: "Camera make", 272: "Camera model", 306: "Taken on", 274: "Rotation", 33434: "Shutter", 33437: "Aperture", 34855: "ISO" };
+  const out = {};
+  const n = g16(tiff + g32(tiff + 4));
+  for (let i = 0; i < n; i++) {
+    const e = tiff + g32(tiff + 4) + 2 + i * 12;
+    const tag = g16(e), type = g16(e + 2), cnt = g32(e + 4);
+    const vo = e + 8;
+    const val = type === 2 ? String.fromCharCode(...new Uint8Array(dv.buffer, tiff + (cnt > 4 ? g32(vo) : vo), Math.min(cnt, 64))).replace(/\0.*$/, "") : g32(vo);
+    if (tags[tag]) out[tags[tag]] = String(val).slice(0, 60);
+  }
+  const gpsOff = (() => {
+    for (let i = 0; i < n; i++) {
+      const e = tiff + g32(tiff + 4) + 2 + i * 12;
+      if (g16(e) === 0x8825) return tiff + g32(e + 8);
+    }
+    return 0;
+  })();
+  if (gpsOff) {
+    const gn = g16(gpsOff);
+    const get = (id) => {
+      for (let i = 0; i < gn; i++) {
+        const e = gpsOff + 2 + i * 12;
+        if (g16(e) === id) {
+          const p = tiff + g32(e + 8);
+          const d = g32(p) / g32(p + 4), m = g32(p + 8) / g32(p + 12), sec = g32(p + 16) / g32(p + 20);
+          return d + m / 60 + sec / 3600;
+        }
+      }
+      return null;
+    };
+    const lat = get(2), lon = get(4);
+    if (lat !== null && lon !== null) out["GPS location"] = lat.toFixed(5) + ", " + lon.toFixed(5);
+  }
+  return out;
+}
+cmd("exifread", "see the hidden camera info inside a photo", async () => {
+  const f = await pickFile();
+  const buf = await f.arrayBuffer();
+  let info;
+  try { info = parseExif(buf); } catch (e) { throw new Error(e.message); }
+  const keys = Object.keys(info);
+  println(f.name + "\n" + (keys.length ? keys.map((k) => k + ": " + info[k]).join("\n") : "no readable camera info"));
+});
+cmd("colorpick", "grab any color you see on screen", async () => {
+  if (window.EyeDropper) {
+    try {
+      const r = await new EyeDropper().open();
+      println("picked: " + r.sRGBHex);
+      return;
+    } catch (e) { /* user cancelled, fall through */ }
+  }
+  const f = await pickFile();
+  const { img, url } = await loadImageFile(f);
+  print('<div class="dim">click the photo to sample a color</div><img id="cpimg" style="max-width:320px;cursor:crosshair">');
+  const el = $("cpimg"); el.src = url;
+  await new Promise((res) => {
+    el.onclick = (ev) => {
+      const r = el.getBoundingClientRect();
+      const cv = document.createElement("canvas");
+      cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+      cv.getContext("2d").drawImage(img, 0, 0);
+      const px = cv.getContext("2d").getImageData(
+        Math.round((ev.clientX - r.left) / r.width * img.naturalWidth),
+        Math.round((ev.clientY - r.top) / r.height * img.naturalHeight), 1, 1).data;
+      const hx = "#" + [px[0], px[1], px[2]].map((v) => v.toString(16).padStart(2, "0")).join("");
+      URL.revokeObjectURL(url); el.remove();
+      println("picked: " + hx);
+      res();
+    };
+  });
+});
+cmd("screenshot", "take a picture of your screen or a window", async () => {
+  let stream;
+  try { stream = await navigator.mediaDevices.getDisplayMedia({ video: true }); }
+  catch (e) { throw new Error("screen capture denied or unavailable"); }
+  const v = document.createElement("video");
+  v.srcObject = stream; v.muted = true;
+  await new Promise((res) => { v.onloadedmetadata = () => { v.play(); res(); }; });
+  await sleep(400);
+  const cv = document.createElement("canvas");
+  cv.width = v.videoWidth; cv.height = v.videoHeight;
+  cv.getContext("2d").drawImage(v, 0, 0);
+  stream.getTracks().forEach((t) => t.stop());
+  cv.toBlob((b) => { downloadBlob(b, "screenshot.png"); println("downloaded screenshot.png"); }, "image/png");
+});
+cmd("audiorec", "record your voice for a few seconds", async (a) => {
+  const secs = Math.min(300, Math.max(1, parseInt(a[0] || "10", 10) || 10));
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => { throw new Error("microphone denied"); });
+  const rec = new MediaRecorder(stream);
+  const chunks = [];
+  rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  const done = new Promise((res) => { rec.onstop = res; });
+  rec.start();
+  print('<span class="dim">recording ' + secs + "s... (red dot in your browser tab)</span>");
+  await sleep(secs * 1000);
+  rec.stop(); await done;
+  stream.getTracks().forEach((t) => t.stop());
+  downloadBlob(new Blob(chunks, { type: rec.mimeType || "audio/webm" }), "recording.webm");
+  println("downloaded recording.webm");
+});
+cmd("videorec", "record a short video with your camera", async (a) => {
+  const secs = Math.min(120, Math.max(1, parseInt(a[0] || "10", 10) || 10));
+  const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true }).catch(() => { throw new Error("camera denied"); });
+  const rec = new MediaRecorder(stream);
+  const chunks = [];
+  rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  const done = new Promise((res) => { rec.onstop = res; });
+  rec.start();
+  print('<span class="dim">recording video ' + secs + "s...</span>");
+  await sleep(secs * 1000);
+  rec.stop(); await done;
+  stream.getTracks().forEach((t) => t.stop());
+  downloadBlob(new Blob(chunks, { type: rec.mimeType || "video/webm" }), "video.webm");
+  println("downloaded video.webm");
+});
+cmd("speak", "have the browser read text out loud (usage: speak [voice#] <text>)", async (a) => {
+  if (!("speechSynthesis" in window)) throw new Error("speech not supported in this browser");
+  const voices = speechSynthesis.getVoices();
+  if (a[0] === "voices") {
+    println(voices.length ? voices.map((v, i) => i + ": " + v.name + " (" + v.lang + ")").join("\n") : "no voices loaded yet — try again in a moment");
+    return;
+  }
+  let idx = 0, text;
+  if (/^\d+$/.test(a[0] || "") && a.length > 1) { idx = +a[0]; text = a.slice(1).join(" "); }
+  else text = a.join(" ");
+  if (!text) throw new Error("usage: speak [voice#] <text>");
+  const u = new SpeechSynthesisUtterance(text);
+  if (voices[idx]) u.voice = voices[idx];
+  speechSynthesis.cancel(); speechSynthesis.speak(u);
+  println("speaking" + (voices[idx] ? " as " + voices[idx].name : "") + "...");
+});
+cmd("stt", "turn your spoken words into text", async () => {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) throw new Error("speech recognition not supported in this browser (try Chrome)");
+  const text = await new Promise((resolve, reject) => {
+    const r = new SR();
+    r.lang = navigator.language || "en-US"; r.interimResults = false;
+    const t = setTimeout(() => { try { r.stop(); } catch (e) {} reject(new Error("timed out with no speech")); }, 20000);
+    r.onresult = (e) => { clearTimeout(t); resolve(e.results[0][0].transcript); };
+    r.onerror = (e) => { clearTimeout(t); reject(new Error("mic error: " + e.error)); };
+    r.onend = () => { clearTimeout(t); reject(new Error("stopped with no speech")); };
+    try { r.start(); } catch (e) { clearTimeout(t); reject(e); }
+    print('<span class="dim">listening... speak now</span>');
+  });
+  println('you said: "' + text + '"');
+});
+cmd("metronome", "keep the beat while you practice music", async (a) => {
+  const bpm = Math.min(300, Math.max(30, parseInt(a[0] || "120", 10) || 120));
+  const beats = Math.min(200, Math.max(1, parseInt(a[1] || "16", 10) || 16));
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  println("metronome: " + bpm + " bpm, " + beats + " beats");
+  for (let i = 0; i < beats; i++) {
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value = i % 4 === 0 ? 1200 : 800;
+    g.gain.setValueAtTime(0.25, ctx.currentTime);
+    o.start(); o.stop(ctx.currentTime + 0.08);
+    await sleep(60000 / bpm);
+  }
+  println("done");
+});
+cmd("tonegen", "play a pure musical tone", async (a) => {
+  const f = Math.min(20000, Math.max(20, parseFloat(a[0]) || 440));
+  const secs = Math.min(30, Math.max(0.1, parseFloat(a[1]) || 2));
+  beep(f, secs);
+  println("played " + f + " Hz for " + secs + "s");
+});
+cmd("noisemeter", "how loud is it around you right now?", async () => {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => { throw new Error("microphone denied"); });
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const src = ctx.createMediaStreamSource(stream);
+  const an = ctx.createAnalyser(); an.fftSize = 2048;
+  src.connect(an);
+  const data = new Float32Array(an.fftSize);
+  print('<span class="dim">listening for 3 seconds...</span>');
+  await sleep(3000);
+  an.getFloatTimeDomainData(data);
+  let sum = 0;
+  for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+  const db = 20 * Math.log10(Math.sqrt(sum / data.length) + 1e-9);
+  stream.getTracks().forEach((t) => t.stop()); ctx.close();
+  const rel = Math.max(0, Math.round(db + 100));
+  println("loudness: " + rel + "/100 (relative scale — 0 silent room, 100 very loud)");
+});
+cmd("camsnap", "take a photo with your camera", async () => {
+  const stream = await navigator.mediaDevices.getUserMedia({ video: true }).catch(() => { throw new Error("camera denied"); });
+  const v = document.createElement("video");
+  v.srcObject = stream; v.muted = true;
+  await new Promise((res) => { v.onloadedmetadata = () => { v.play(); res(); }; });
+  await sleep(500);
+  const cv = document.createElement("canvas");
+  cv.width = v.videoWidth; cv.height = v.videoHeight;
+  cv.getContext("2d").drawImage(v, 0, 0);
+  stream.getTracks().forEach((t) => t.stop());
+  cv.toBlob((b) => { downloadBlob(b, "snapshot.png"); println("downloaded snapshot.png"); }, "image/png");
+});
+cmd("audiofmt", "what is inside an audio file (length, quality...)", async () => {
+  const f = await pickFile();
+  const buf = await f.arrayBuffer();
+  const ctx = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 1, 44100);
+  let dec;
+  try { dec = await ctx.decodeAudioData(buf); }
+  catch (e) { throw new Error("could not decode that audio file"); }
+  println(f.name + "\nlength: " + dec.duration.toFixed(1) + "s\nquality: " + dec.sampleRate + " Hz\nchannels: " + (dec.numberOfChannels === 1 ? "mono" : dec.numberOfChannels === 2 ? "stereo" : dec.numberOfChannels));
+});
+</script>
+<script>
+"use strict";
+/* ---------- Productivity (12) ---------- */
+cmd("notes", "a little notebook that lives in your browser", async (a, line) => {
+  let notes = store.get("notes", []);
+  const sub = (a[0] || "").toLowerCase();
+  if (sub === "add") {
+    const t = line.slice(line.indexOf("add") + 3).trim();
+    if (!t) throw new Error("usage: notes add <text>");
+    notes.push({ t, ts: Date.now() }); store.set("notes", notes);
+    println("saved note #" + (notes.length - 1));
+  } else if (sub === "del") {
+    const n = parseInt(a[1], 10);
+    if (isNaN(n) || !notes[n]) throw new Error("usage: notes del <number>");
+    notes.splice(n, 1); store.set("notes", notes);
+    println("deleted");
+  } else if (sub === "clear") { store.set("notes", []); println("all notes cleared"); }
+  else {
+    println(notes.length ? notes.map((x, i) => "[" + i + "] " + x.t.slice(0, 100)).join("\n") + "\n(hint: notes add <text>)" : "no notes yet — notes add <text>");
+  }
+});
+cmd("todo", "a to-do list that remembers what you finished", async (a, line) => {
+  let todos = store.get("todos", []);
+  const sub = (a[0] || "").toLowerCase();
+  if (sub === "add") {
+    const t = line.slice(line.indexOf("add") + 3).trim();
+    if (!t) throw new Error("usage: todo add <text>");
+    todos.push({ t, done: false }); store.set("todos", todos);
+    println("added #" + (todos.length - 1));
+  } else if (sub === "done") {
+    const n = parseInt(a[1], 10);
+    if (isNaN(n) || !todos[n]) throw new Error("usage: todo done <number>");
+    todos[n].done = !todos[n].done; store.set("todos", todos);
+    println(todos[n].done ? "marked done" : "marked not done");
+  } else if (sub === "del") {
+    const n = parseInt(a[1], 10);
+    if (isNaN(n) || !todos[n]) throw new Error("usage: todo del <number>");
+    todos.splice(n, 1); store.set("todos", todos);
+    println("deleted");
+  } else {
+    println(todos.length ? todos.map((x, i) => "[" + i + "] " + (x.done ? "DONE " : ".... ") + x.t.slice(0, 90)).join("\n") : "nothing to do — todo add <text>");
+  }
+});
+cmd("countdown", "count down the seconds, with a beep at zero", async (a) => {
+  let s = parseInt(a[0], 10);
+  if (!s || s < 1 || s > 3600) throw new Error("usage: countdown <seconds>");
+  print('<span class="dim">counting down from ' + s + "s...</span>");
+  while (s > 0) { await sleep(1000); s--; if (s > 0 && s % 10 === 0) println(s + "s left..."); }
+  beep(880, 0.4); await sleep(200); beep(880, 0.4);
+  print('<span class="acc">time is up!</span>');
+});
+cmd("stopwatch", "a stopwatch: start, stop, lap", async (a) => {
+  const sub = (a[0] || "").toLowerCase();
+  S.sw = S.sw || { t0: 0, acc: 0, running: false, laps: [] };
+  const w = S.sw;
+  const fmt = (ms) => { const s = ms / 1000; return Math.floor(s / 60) + ":" + (s % 60).toFixed(1).padStart(4, "0"); };
+  const now = () => w.acc + (w.running ? performance.now() - w.t0 : 0);
+  if (sub === "start") { if (w.running) throw new Error("already running"); w.running = true; w.t0 = performance.now(); println("started"); }
+  else if (sub === "stop") { if (!w.running) throw new Error("not running"); w.acc = now(); w.running = false; println("stopped at " + fmt(w.acc)); }
+  else if (sub === "lap") { w.laps.push(now()); println("lap " + w.laps.length + ": " + fmt(w.laps[w.laps.length - 1])); }
+  else if (sub === "reset") { S.sw = { t0: 0, acc: 0, running: false, laps: [] }; println("reset"); }
+  else println("elapsed: " + fmt(now()) + (w.laps.length ? "\nlaps: " + w.laps.map(fmt).join(", ") : "") + "\n(hint: stopwatch start|stop|lap|reset)");
+});
+cmd("pomodoro", "work in focused bursts with breaks", async (a) => {
+  const work = Math.min(120, Math.max(1, parseInt(a[0] || "25", 10) || 25));
+  const rest = Math.min(60, Math.max(1, parseInt(a[1] || "5", 10) || 5));
+  print('<span class="acc">focus for ' + work + " minutes... (keep this tab open)</span>");
+  await sleep(work * 60000);
+  beep(660, 0.5);
+  print('<span class="warn">break time! ' + rest + " minutes. stretch, drink water.</span>");
+  await sleep(rest * 60000);
+  beep(880, 0.5);
+  print('<span class="acc">break over — ready for the next round?</span>');
+});
+function calcEval(expr) {
+  const toks = expr.match(/(\d+\.?\d*|\.\d+|[+\-*/%^()])/g);
+  if (!toks || toks.join("").replace(/\s/g, "") !== expr.replace(/\s/g, "")) throw new Error("only numbers and + - * / % ^ ( ) allowed");
+  let i = 0;
+  function peek() { return toks[i]; }
+  function next() { return toks[i++]; }
+  function parseE() {
+    let v = parseT();
+    while (peek() === "+" || peek() === "-") { const op = next(); const r = parseT(); v = op === "+" ? v + r : v - r; }
+    return v;
+  }
+  function parseT() {
+    let v = parseF();
+    while (peek() === "*" || peek() === "/" || peek() === "%") { const op = next(); const r = parseF(); v = op === "*" ? v * r : op === "/" ? v / r : v % r; }
+    return v;
+  }
+  function parseF() {
+    let v = parseP();
+    if (peek() === "^") { next(); v = Math.pow(v, parseF()); }
+    return v;
+  }
+  function parseP() {
+    const t = next();
+    if (t === "(") { const v = parseE(); if (next() !== ")") throw new Error("missing )"); return v; }
+    if (t === "-") return -parseP();
+    const n = parseFloat(t);
+    if (isNaN(n)) throw new Error("bad number: " + t);
+    return n;
+  }
+  const v = parseE();
+  if (i !== toks.length) throw new Error("could not understand that");
+  return v;
+}
+cmd("calc", "a calculator that never runs unknown code", async (a) => {
+  const expr = a.join(" ");
+  if (!expr) throw new Error("usage: calc <expression>  e.g. calc (2+3)*4");
+  try {
+    const v = calcEval(expr);
+    println(expr + " = " + (Math.round(v * 1e10) / 1e10));
+  } catch (e) { throw new Error(e.message); }
+});
+cmd("unitconv", "switch between miles/km, pounds/kg, F/C and more", async (a) => {
+  if (a.length < 3) throw new Error("usage: unitconv <number> <from> <to>");
+  const v = parseFloat(a[0]), from = a[1].toLowerCase(), to = a[2].toLowerCase();
+  if (isNaN(v)) throw new Error("need a number first");
+  const L = { m: 1, km: 1000, mi: 1609.34, ft: 0.3048, in: 0.0254, cm: 0.01 };
+  const M = { kg: 1, g: 0.001, lb: 0.453592, oz: 0.0283495 };
+  const D = { b: 1, kb: 1024, mb: 1048576, gb: 1073741824 };
+  let out;
+  if (L[from] && L[to]) out = v * L[from] / L[to];
+  else if (M[from] && M[to]) out = v * M[from] / M[to];
+  else if (D[from] && D[to]) out = v * D[from] / D[to];
+  else if ((from === "c" || from === "f" || from === "k") && (to === "c" || to === "f" || to === "k")) {
+    const c = from === "c" ? v : from === "f" ? (v - 32) * 5 / 9 : v - 273.15;
+    out = to === "c" ? c : to === "f" ? c * 9 / 5 + 32 : c + 273.15;
+  } else throw new Error("unknown units (try m km mi ft in cm | kg g lb oz | c f k | b kb mb gb)");
+  println(a[0] + " " + from + " = " + (Math.round(out * 10000) / 10000) + " " + to);
+});
+cmd("tzconv", "what time is it somewhere else right now", async (a) => {
+  if (a.length < 3) throw new Error("usage: tzconv <HH:MM> <from-zone> <to-zone>  e.g. tzconv 14:30 America/New_York Europe/London");
+  const m = /^(\d{1,2}):(\d{2})$/.exec(a[0]);
+  if (!m) throw new Error("time must look like 14:30");
+  const from = a[1], to = a[2];
+  const now = new Date();
+  const zoneOffset = (tz) => {
+    const p = new Intl.DateTimeFormat("en-US", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).formatToParts(now);
+    const g = (t) => +p.find((x) => x.type === t).value;
+    return Date.UTC(g("year"), g("month") - 1, g("day"), g("hour") % 24, g("minute"), g("second")) - now.getTime();
+  };
+  let offFrom, offTo;
+  try { offFrom = zoneOffset(from); offTo = zoneOffset(to); }
+  catch (e) { throw new Error("unknown timezone (use like America/New_York)"); }
+  const wallAsUTC = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), +m[1], +m[2]);
+  const there = new Date(wallAsUTC - offFrom);
+  const fmt = new Intl.DateTimeFormat("en-US", { timeZone: to, hour: "2-digit", minute: "2-digit", hour12: false });
+  println(a[0] + " in " + from + " = " + fmt.format(there) + " in " + to);
+});
+cmd("tipcalc", "split a restaurant bill fairly", async (a) => {
+  const bill = parseFloat(a[0]), pct = parseFloat(a[1] || "20"), split = parseInt(a[2] || "1", 10);
+  if (!bill || bill < 0 || !pct || pct < 0 || !split || split < 1) throw new Error("usage: tipcalc <bill> [percent] [people]");
+  const tip = bill * pct / 100, total = bill + tip;
+  println("bill: $" + bill.toFixed(2) + "\ntip (" + pct + "%): $" + tip.toFixed(2) + "\ntotal: $" + total.toFixed(2) +
+    (split > 1 ? "\neach of " + split + " pays: $" + (total / split).toFixed(2) : ""));
+});
+cmd("diceroll", "roll dice, honestly random", async (a) => {
+  const m = /^(\d{1,3})d(\d{1,4})$/.exec(a[0] || "1d6");
+  if (!m) throw new Error("usage: diceroll [NdM]  e.g. diceroll 2d6");
+  const n = +m[1], sides = +m[2];
+  if (n < 1 || n > 100 || sides < 2) throw new Error("keep it sane: up to 100 dice, 2+ sides");
+  const rnd = crypto.getRandomValues(new Uint32Array(n));
+  const rolls = [...rnd].map((r) => 1 + r % sides);
+  println("rolled: " + rolls.join(", ") + (n > 1 ? "\ntotal: " + rolls.reduce((x, y) => x + y, 0) : ""));
+});
+cmd("coinflip", "heads or tails, honestly random", async () => {
+  println(crypto.getRandomValues(new Uint8Array(1))[0] < 128 ? "heads" : "tails");
+});
+cmd("pickone", "let chance decide from your options", async (a) => {
+  if (!a.length) throw new Error("usage: pickone <option1> <option2> ...");
+  println(a[crypto.getRandomValues(new Uint32Array(1))[0] % a.length]);
+});
+</script>
+<script>
+"use strict";
+/* ---------- Dev tools (12) ---------- */
+function parseColor(t) {
+  t = t.trim().toLowerCase();
+  let m = /^#([0-9a-f]{3})$/.exec(t);
+  if (m) { const h = m[1]; return [0, 1, 2].map((i) => parseInt(h[i] + h[i], 16)); }
+  m = /^#([0-9a-f]{6})$/.exec(t);
+  if (m) return [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16));
+  m = /^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/.exec(t);
+  if (m) return m.slice(1, 4).map(Number);
+  m = /^hsl\(\s*(\d+)\s*,\s*(\d+)%\s*,\s*(\d+)%\s*\)$/.exec(t);
+  if (m) {
+    let h = +m[1] / 360, s2 = +m[2] / 100, l = +m[3] / 100;
+    const f = (p, q, t2) => {
+      if (t2 < 0) t2 += 1; if (t2 > 1) t2 -= 1;
+      if (t2 < 1 / 6) return p + (q - p) * 6 * t2;
+      if (t2 < 1 / 2) return q;
+      if (t2 < 2 / 3) return p + (q - p) * (2 / 3 - t2) * 6;
+      return p;
+    };
+    let r, g, b;
+    if (!s2) r = g = b = l;
+    else { const q = l < 0.5 ? l * (1 + s2) : l + s2 - l * s2; const p = 2 * l - q; r = f(p, q, h + 1 / 3); g = f(p, q, h); b = f(p, q, h - 1 / 3); }
+    return [r, g, b].map((v) => Math.round(v * 255));
+  }
+  return null;
+}
+function rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+  let h = 0, s = 0; const l = (mx + mn) / 2;
+  if (mx !== mn) {
+    const d = mx - mn;
+    s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+    if (mx === r) h = (g - b) / d + (g < b ? 6 : 0);
+    else if (mx === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+  }
+  return [Math.round(h), Math.round(s * 100), Math.round(l * 100)];
+}
+cmd("colorconv", "switch a color between hex, rgb and hsl", async (a) => {
+  const t = a.join(" ");
+  const rgb = parseColor(t);
+  if (!rgb || rgb.some((v) => v < 0 || v > 255)) throw new Error("usage: colorconv <#ff8800 | rgb(255,136,0) | hsl(32,100%,50%)>");
+  const hx = "#" + rgb.map((v) => v.toString(16).padStart(2, "0")).join("");
+  const hsl = rgbToHsl(...rgb);
+  print('<span style="display:inline-block;width:14px;height:14px;background:' + hx + ';border:1px solid var(--dim)"></span> ' +
+    esc(hx) + "  =  rgb(" + rgb.join(", ") + ")  =  hsl(" + hsl[0] + ", " + hsl[1] + "%, " + hsl[2] + "%)");
+});
+cmd("contrast", "check if text is readable on a background", async (a) => {
+  if (a.length < 2) throw new Error("usage: contrast <text-color> <background-color>");
+  const t = parseColor(a[0]), b = parseColor(a[1]);
+  if (!t || !b) throw new Error("use hex colors like #ffffff #000000");
+  const lum = (c) => {
+    const s = c.map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+    return 0.2126 * s[0] + 0.7152 * s[1] + 0.0722 * s[2];
+  };
+  const l1 = lum(t), l2 = lum(b);
+  const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+  const verdict = ratio >= 7 ? "excellent (AAA)" : ratio >= 4.5 ? "good (AA)" : ratio >= 3 ? "okay for big text only" : "too hard to read";
+  print('contrast ratio: <b>' + ratio.toFixed(2) + ":1</b> — " + verdict +
+    '<br><span style="background:#' + a[1].replace("#", "") + ";color:#" + a[0].replace("#", "") + ';padding:4px 10px">Sample text</span>');
+});
+cmd("csspx", "switch between px, rem, em and pt sizes", async (a) => {
+  const m = /^([\d.]+)(px|rem|em|pt)$/.exec((a[0] || "").toLowerCase());
+  if (!m) throw new Error("usage: csspx <number><px|rem|em|pt>  e.g. csspx 24px");
+  const v = parseFloat(m[1]), from = m[2];
+  const px = from === "px" ? v : from === "pt" ? v * 96 / 72 : v * 16;
+  println(a[0] + " =\n" + (px).toFixed(2) + " px\n" + (px / 16).toFixed(3) + " rem\n" + (px / 16).toFixed(3) + " em\n" + (px * 72 / 96).toFixed(2) + " pt\n(rem/em assume 16px base)");
+});
+cmd("baseconv", "switch a number between binary, octal, decimal and hex", async (a) => {
+  if (a.length < 3) throw new Error("usage: baseconv <number> <from-base> <to-base>");
+  const n = parseInt(a[0], parseInt(a[1], 10));
+  if (isNaN(n)) throw new Error("that is not a valid base-" + a[1] + " number");
+  const to = parseInt(a[2], 10);
+  if (![2, 8, 10, 16].includes(to)) throw new Error("bases: 2, 8, 10 or 16");
+  println(a[0] + " (base " + a[1] + ") = " + n.toString(to).toUpperCase() + " (base " + to + ")");
+});
+const ROMAN = [[1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"], [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]];
+cmd("roman", "switch between 42 and XLII", async (a) => {
+  const t = (a[0] || "").toUpperCase();
+  if (!t) throw new Error("usage: roman <number|XII>");
+  if (/^\d+$/.test(t)) {
+    let n = +t, out = "";
+    if (n < 1 || n > 3999) throw new Error("range 1-3999");
+    for (const [v, s] of ROMAN) while (n >= v) { out += s; n -= v; }
+    println(a[0] + " = " + out);
+  } else if (/^[MDCLXVI]+$/.test(t)) {
+    let total = 0;
+    const val = (c) => ROMAN.find((r) => r[1] === c)[0];
+    for (let i = 0; i < t.length; i++) {
+      const v = val(t[i]), nx = i + 1 < t.length ? val(t[i + 1]) : 0;
+      total += v < nx ? -v : v;
+    }
+    println(t + " = " + total);
+  } else throw new Error("use digits or roman letters");
+});
+const MORSE = { A: ".-", B: "-...", C: "-.-.", D: "-..", E: ".", F: "..-.", G: "--.", H: "....", I: "..", J: ".---", K: "-.-", L: ".-..", M: "--", N: "-.", O: "---", P: ".--.", Q: "--.-", R: ".-.", S: "...", T: "-", U: "..-", V: "...-", W: ".--", X: "-..-", Y: "-.--", Z: "--..", 0: "-----", 1: ".----", 2: "..---", 3: "...--", 4: "....-", 5: ".....", 6: "-....", 7: "--...", 8: "---..", 9: "----.", " ": "/" };
+const MORSE_R = Object.fromEntries(Object.entries(MORSE).map(([k, v]) => [v, k]));
+cmd("morse", "turn text into beeps-and-dots code (and back)", async (a, line) => {
+  const t = line.slice(line.indexOf(" ") + 1);
+  if (!t.trim()) throw new Error("usage: morse <text>  or  morse ... --- ...");
+  if (/^[.\- /]+$/.test(t.trim())) {
+    println(t.trim().split(" ").map((w) => w === "/" ? " " : (MORSE_R[w] || "?")).join("").replace(/ +/g, " "));
+  } else {
+    println(t.toUpperCase().split("").map((c) => MORSE[c] || "?").join(" "));
+  }
+});
+const NATO = { A: "Alpha", B: "Bravo", C: "Charlie", D: "Delta", E: "Echo", F: "Foxtrot", G: "Golf", H: "Hotel", I: "India", J: "Juliett", K: "Kilo", L: "Lima", M: "Mike", N: "November", O: "Oscar", P: "Papa", Q: "Quebec", R: "Romeo", S: "Sierra", T: "Tango", U: "Uniform", V: "Victor", W: "Whiskey", X: "X-ray", Y: "Yankee", Z: "Zulu", 0: "Zero", 1: "One", 2: "Two", 3: "Three", 4: "Four", 5: "Five", 6: "Six", 7: "Seven", 8: "Eight", 9: "Niner" };
+cmd("nato", "spell something the pilot way (Alpha Bravo...)", async (a) => {
+  const t = a.join(" ").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!t) throw new Error("usage: nato <text>");
+  println(t.split("").map((c) => NATO[c]).join(" "));
+});
+cmd("qrbatch", "make several QR codes at once (separate with | )", async (a, line) => {
+  const items = line.slice(line.indexOf(" ") + 1).split("|").map((s) => s.trim()).filter(Boolean).slice(0, 6);
+  if (!items.length) throw new Error("usage: qrbatch <text1> | <text2> | ...");
+  try { if (!window.qrcode) await lazyScript("https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"); }
+  catch (e) { throw new Error("QR library unreachable — offline?"); }
+  const imgs = items.map((t) => {
+    const qr = qrcode(0, "M"); qr.addData(t); qr.make();
+    return '<div style="display:inline-block;margin:4px;text-align:center"><img src="' + qr.createDataURL(3, 4) + '"><div class="dim" style="font-size:10px">' + esc(t.slice(0, 24)) + "</div></div>";
+  });
+  print(imgs.join(""));
+});
+cmd("urlparse", "take a web address apart piece by piece", async (a) => {
+  if (!a[0]) throw new Error("usage: urlparse <url>");
+  let u;
+  try { u = new URL(a[0]); } catch (e) { throw new Error("not a valid URL"); }
+  const q = {};
+  u.searchParams.forEach((v, k) => { q[k] = v; });
+  println("page: " + u.protocol + "//" + u.host + u.pathname +
+    "\nprotocol: " + u.protocol.replace(":", "") + "\nsite: " + u.hostname + "\nport: " + (u.port || "(default)") +
+    "\npath: " + (u.pathname || "/") + "\nsearch: " + (u.search || "(none)") + "\n#anchor: " + (u.hash || "(none)") +
+    (Object.keys(q).length ? "\nvalues: " + JSON.stringify(q) : ""));
+});
+cmd("crondesc", "translate a schedule line into plain English", async (a) => {
+  const f = a.join(" ").trim().split(/\s+/);
+  if (f.length !== 5) throw new Error("usage: crondesc <min> <hour> <day> <month> <weekday>  e.g. crondesc 0 9 * * 1");
+  const desc = (v, one, many) => {
+    if (v === "*") return "every " + many;
+    if (v.includes(",")) return many + " " + v.split(",").join(" and ");
+    if (v.includes("-")) { const [x, y] = v.split("-"); return "every " + many + " from " + x + " to " + y; }
+    if (v.startsWith("*/")) return "every " + v.slice(2) + " " + many;
+    return many + " " + v;
+  };
+  println("runs at minute " + desc(f[0], "minute", "minutes") + ", hour " + desc(f[1], "hour", "hours") +
+    ", day " + (f[2] === "*" ? "every day" : "on day " + f[2]) + ", month " + (f[3] === "*" ? "every month" : "in month " + f[3]) +
+    ", weekday " + (f[4] === "*" ? "any day of week" : "on weekday " + f[4]));
+});
+cmd("unicode", "see the secret codes behind each character", async (a) => {
+  const t = a.join(" ");
+  if (!t) throw new Error("usage: unicode <text>");
+  println([...t].map((c) => { const cp = c.codePointAt(0); return "U+" + cp.toString(16).toUpperCase().padStart(4, "0") + " " + c; }).join("\n"));
+});
+cmd("uuid7", "make an ID that sorts by time (newer first)", async () => {
+  const now = BigInt(Date.now());
+  const rnd = crypto.getRandomValues(new Uint8Array(10));
+  const b = new Uint8Array(16);
+  for (let i = 0; i < 6; i++) b[i] = Number((now >> BigInt(8 * (5 - i))) & 0xFFn);
+  b[6] = 0x70 | (rnd[0] & 0x0f);
+  b.set(rnd.slice(1, 9), 7);
+  b[8] = 0x80 | (b[8] & 0x3f);
+  const hx = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+  println(hx.slice(0, 8) + "-" + hx.slice(8, 12) + "-" + hx.slice(12, 16) + "-" + hx.slice(16, 20) + "-" + hx.slice(20));
+});
+</script>
+<script>
+"use strict";
+/* ---------- Fun & utility (10) ---------- */
+const BALL8 = ["yes, definitely", "ask again later", "no way", "probably", "do not count on it", "signs point to yes", "better not tell you now", "it is certain", "very doubtful", "without a doubt", "do not bet on it", "looks good"];
+cmd("eightball", "ask the magic ball a yes-or-no question", async (a) => {
+  if (!a.length) throw new Error("usage: eightball <your question>");
+  await sleep(600);
+  print('<span class="acc">the ball says: ' + BALL8[crypto.getRandomValues(new Uint32Array(1))[0] % BALL8.length] + "</span>");
+});
+const QUOTES = [
+  "The best time to plant a tree was 20 years ago. The second best time is now.",
+  "Whether you think you can or you think you can't, you're right. - Henry Ford",
+  "Action is the foundational key to all success. - Pablo Picasso",
+  "The only way to do great work is to love what you do. - Steve Jobs",
+  "Don't watch the clock; do what it does. Keep going. - Sam Levenson",
+  "It always seems impossible until it's done. - Nelson Mandela",
+  "What we think, we become. - Buddha",
+  "The future belongs to those who believe in the beauty of their dreams. - Eleanor Roosevelt"
+];
+cmd("quote", "a little wisdom for the day", async () => {
+  println(QUOTES[crypto.getRandomValues(new Uint32Array(1))[0] % QUOTES.length]);
+});
+const DADJOKES = [
+  "Why don't scientists trust atoms? Because they make up everything.",
+  "I told my wife she was drawing her eyebrows too high. She looked surprised.",
+  "Why did the scarecrow win an award? He was outstanding in his field.",
+  "I'm reading a book about anti-gravity. It's impossible to put down.",
+  "Did you hear about the mathematician who's afraid of negative numbers? He'll stop at nothing to avoid them.",
+  "Why did the bicycle fall over? It was two-tired.",
+  "I used to hate facial hair, but then it grew on me."
+];
+cmd("dadjoke", "a joke so bad it is good", async () => {
+  println(DADJOKES[crypto.getRandomValues(new Uint32Array(1))[0] % DADJOKES.length]);
+});
+cmd("rps", "rock paper scissors against the computer", async (a) => {
+  const you = (a[0] || "").toLowerCase();
+  if (!["rock", "paper", "scissors"].includes(you)) throw new Error("usage: rps <rock|paper|scissors>");
+  const pc = ["rock", "paper", "scissors"][crypto.getRandomValues(new Uint32Array(1))[0] % 3];
+  const win = (you === "rock" && pc === "scissors") || (you === "paper" && pc === "rock") || (you === "scissors" && pc === "paper");
+  print("you: " + you + "  computer: " + pc + "<br>" +
+    (you === pc ? '<span class="warn">tie!</span>' : win ? '<span class="acc">you win!</span>' : '<span class="err">computer wins</span>'));
+});
+const FLIPMAP = { a: "\u0250", b: "q", c: "\u0254", d: "p", e: "\u01dd", f: "\u025f", g: "\u0183", h: "\u0265", i: "\u0131", j: "\u027e", k: "\u029e", l: "l", m: "\u026f", n: "u", o: "o", p: "d", q: "b", r: "\u0279", s: "s", t: "\u0287", u: "n", v: "\u028c", w: "\u028d", x: "x", y: "\u028e", z: "z", ".": "\u02d9", ",": "'", "!": "\u00a1", "?": "\u00bf", " ": " " };
+cmd("fliptext", "turn your words upside down", async (a) => {
+  const t = a.join(" ").toLowerCase();
+  if (!t) throw new Error("usage: fliptext <text>");
+  println(t.split("").reverse().map((c) => FLIPMAP[c] || c).join(""));
+});
+cmd("emojistrip", "take all the emojis out of some text", async (a) => {
+  const t = a.join(" ");
+  if (!t) throw new Error("usage: emojistrip <text>");
+  println(t.replace(/\p{Extended_Pictographic}/gu, "").replace(/  +/g, " ").trim());
+});
+cmd("slugify", "turn a headline into a tidy web address piece", async (a) => {
+  const t = a.join(" ");
+  if (!t) throw new Error("usage: slugify <text>");
+  println(t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""));
+});
+cmd("excerpt", "cut text down to its first few words", async (a) => {
+  const n = parseInt(a[0], 10);
+  if (!n || n < 1) throw new Error("usage: excerpt <word-count> <text>");
+  const words = a.slice(1).join(" ").split(/\s+/);
+  println(words.slice(0, n).join(" ") + (words.length > n ? "..." : "") + "\n(" + Math.min(n, words.length) + " of " + words.length + " words)");
+});
+cmd("repeat", "say the same thing many times", async (a) => {
+  const n = Math.min(50, parseInt(a[0], 10));
+  if (!n || n < 1) throw new Error("usage: repeat <times> <text>");
+  println(new Array(n).fill(a.slice(1).join(" ")).join("\n"));
+});
+cmd("sortlines", "sort lines A to Z (add -u for unique only)", async (a, line) => {
+  const uniq = a[0] === "-u";
+  const body = line.slice(line.indexOf(" ") + 1 + (uniq ? 3 : 0)).trim();
+  if (!body) throw new Error("usage: sortlines [-u] <line1> <line2> ... (separate with | )");
+  let lines = body.split("|").map((s) => s.trim());
+  lines.sort((x, y) => x.localeCompare(y));
+  if (uniq) lines = [...new Set(lines)];
+  println(lines.join("\n"));
+});
+</script>
+<script>
+"use strict";
+/* ---------- Visual dashboard (200 tools, plain English) ---------- */
+/* each card: [command, icon, plain name, layman's description, mode]  mode: run = one click, fill = needs your input */
+const DASH = [
+["\u0001F510 Lock it up", [
+ ["newid","\u0001F194","New identity","Start over with a brand-new secret identity","fill"],
+ ["myid","\u0001FAAA","My identity card","See your fingerprint, secret words and public key","run"],
+ ["exportkey","\u0001F4BE","Save my public key","Download your public key to share with friends","run"],
+ ["importkey","\u0001F50D","Check a key","Make sure someone's public key is real and valid","fill"],
+ ["seal","\u2709\uFE0F","Seal a test message","Lock a message to see what the scrambled version looks like","fill"],
+ ["openenv","\u0001F4ED","Open an envelope","Unlock and check a sealed message","fill"],
+ ["selftest","\u2705","Test my locks","Prove the encryption works with a live self-check","run"],
+ ["words","\u0001F5E3\uFE0F","Secret words","Your 4-word check — read them aloud to verify a friend","run"],
+ ["qrgen","\u0001F4F7","My pair code","Show a QR code so a friend can add you","run"],
+ ["qrscan","\u0001F4F8","Scan pair code","Use the camera to add a friend from their QR","run"],
+ ["sha256","#\uFE0F\u20E3","Fingerprint text","Make a unique fingerprint of any text","fill"],
+ ["sha512","#\uFE0F\u20E3","Stronger fingerprint","A longer fingerprint of any text","fill"],
+ ["hmac","\u0001F50F","Stamp text with a key","Prove text came from whoever holds the secret key","fill"],
+ ["rand","\u0001F3B2","Random bytes","Make random secret bytes for keys and tokens","run"]
+]],
+["\u0001F50F Secret tools", [
+ ["passphrase","\u0001F511","Easy strong password","A password of random words you can actually remember","run"],
+ ["totp","\u23F1\uFE0F","Login code","6-digit code from your secret, like authenticator apps","fill"],
+ ["pbkdf2","\u0001F504","Stretch a password","Turn a password into a strong key, slowly on purpose","fill"],
+ ["esign","\u2712\uFE0F","Sign a message","Prove a message really came from you","fill"],
+ ["everify","\u2714\uFE0F","Check a signature","Prove a signed message is real and untouched","fill"],
+ ["jwtdecode","\u0001F3AB","Peek in a login token","See what's inside a website login token","fill"],
+ ["lock","\u0001F512","Lock text with password","Hide text so only the password opens it","fill"],
+ ["unlock","\u0001F513","Unlock text","Open text that was locked with a password","fill"],
+ ["entropy","\u0001F9EE","How strong is my password?","Estimate how hard a password is to crack","fill"],
+ ["certinfo","\u0001F4DC","Website certificates","Look up a site's public security certificates","fill"],
+ ["hmacfile","\u0001F4C4","Fingerprint a file","Stamp a file to prove it was never changed","fill"],
+ ["wrapdemo","\u0001F381","Key inside a key","Watch one secret key get locked inside another","run"]
+]],
+["\u0001F465 People", [
+ ["trust","\u2795","Add a friend","Pair with someone using their public key","fill"],
+ ["peers","\u0001F4CB","My friends","Everyone you've paired with","run"],
+ ["untrust","\u2796","Remove a friend","Delete someone from your list","fill"],
+ ["trustlevel","\u2B50","Set trust level","Mark someone as admin (100+) or regular","fill"],
+ ["peerinfo","\u2139\uFE0F","Friend details","Everything about one friend","fill"],
+ ["exportpeers","\u0001F4BE","Save friends list","Download your friends as a backup","run"],
+ ["importpeers","\u0001F4E5","Restore friends","Add friends back from a backup","fill"],
+ ["attest","\u0001FAAA","My device card","Show this device's description card","run"],
+ ["attest-send","\u0001F4E4","Send my device card","Share your device description with a friend","fill"],
+ ["attest-verify","\u0001F50E","Check a device card","See a friend's saved device description","fill"]
+]],
+["\u0001F4E1 Connections", [
+ ["rtcoffer","\u0001F4DE","Connect: step 1","Create a connection offer to send a friend","fill"],
+ ["rtcanswer","\u0001F4F2","Connect: step 2","Turn their offer into an answer","fill"],
+ ["rtcaccept","\u0001F91D","Connect: step 3","Finish connecting with their answer","fill"],
+ ["rtclist","\u0001F4CB","My connections","All open data links","run"],
+ ["rtcstate","\u0001F4F6","Connection health","Is a link actually connected?","fill"],
+ ["rtcstats","\u0001F4CA","Link statistics","Speed and quality numbers","fill"],
+ ["ice-restart","\u0001F504","Fix a stuck link","Find a fresh route when frozen","fill"],
+ ["candidates","\u0001F9ED","My network paths","Addresses this browser found","fill"],
+ ["myip","\u0001F30D","My public address","Your internet address, no website needed","run"],
+ ["localips","\u0001F3E0","My local addresses","Your home/office network addresses","run"],
+ ["dclog","\u0001F4DD","Connection log","What was sent and received lately","run"],
+ ["sigset","\u0001F50C","Helper server","Set a server to swap connection info","fill"],
+ ["sigsend","\u0001F4E8","Send via helper","Swap connection info through the server","fill"],
+ ["ping","\u0001F3D3","Ping a friend","How fast do messages travel?","fill"],
+ ["rtt","\u23F1\uFE0F","Last speed","The last measured message speed","run"],
+ ["hangup","\u0001F4F4","Hang up","Close a connection","fill"]
+]],
+["\u0001F4AC Messages", [
+ ["dispatch","\u0001F48C","Send secret message","Encrypted message to a friend","fill"],
+ ["inbox","\u0001F4E5","Inbox","Read received messages","run"],
+ ["inboxsearch","\u0001F50D","Search messages","Find old messages by word","fill"],
+ ["inboxclear","\u0001F9F9","Empty inbox","Delete all messages","fill"],
+ ["msginfo","\u0001F50E","Message details","Full details of one message","fill"],
+ ["broadcast","\u0001F4E2","Message everyone","One encrypted message to all friends","fill"],
+ ["heartbeat","\u0001F493","Heartbeat","Let friends know you're alive (on/off)","fill"],
+ ["presence","\u0001F7E2","Who's online?","Which friends are around","run"],
+ ["watchdog","\u0001F436","Watchdog","Warn me when a friend goes quiet (on/off)","fill"],
+ ["sos","\u0001F198","Send SOS","Send your GPS to a friend in an emergency","fill"],
+ ["exportlog","\u0001F4BE","Save my messages","Download your inbox as backup","run"],
+ ["sendfile","\u0001F4CE","Send a file","Any file, encrypted, to a friend","fill"],
+ ["recvlist","\u0001F4E6","Received files","Files friends sent you","run"],
+ ["getfile","\u2B07\uFE0F","Download a file","Save a received file","fill"]
+]],
+["\u0001F4DE Calls", [
+ ["vcoffer","\u0001F4DE","Voice call: step 1","Start a call offer","fill"],
+ ["vcanswer","\u0001F4F2","Answer call: step 2","Answer with voice or video","fill"],
+ ["vcaccept","\u0001F91D","Finish call setup","Complete the connection","fill"],
+ ["vchangup","\u0001F4F4","End call","Hang up now","run"],
+ ["mute","\u0001F507","Mute / unmute","Turn your microphone off and on","run"],
+ ["camoff","\u0001F4F7","Camera off / on","Turn your camera off and on","run"],
+ ["screenshare","\u0001F5A5\uFE0F","Share my screen","Show your screen in the call","run"],
+ ["callstats","\u0001F4CA","Call quality","Delay, speed and quality numbers","run"],
+ ["recstart","\u23FA\uFE0F","Record call","Start recording","run"],
+ ["recsave","\u0001F4BE","Save recording","Stop and download it","run"],
+ ["devices","\u0001F399\uFE0F","Cameras & mics","List your cameras and microphones","run"],
+ ["setmic","\u0001F3A4","Choose microphone","Pick which mic calls use","fill"]
+]],
+["\u0001F9F0 Toolbox", [
+ ["httphead","\u0001F4C4","Page headers","Peek at a website's technical headers","fill"],
+ ["httpget","\u0001F310","Fetch a page","Download what an address returns","fill"],
+ ["doh","\u0001F50D","Find a website (Google)","Look up a domain via Google","fill"],
+ ["rdap","\u0001F3E2","Who owns a domain?","Domain registration info","fill"],
+ ["speedtest","\u0001F680","Speed test","How fast is your internet?","run"],
+ ["fetchping","\u0001F3D3","Ping a website","Time how fast a page answers","fill"],
+ ["battery","\u0001F50B","Battery status","How much charge is left","run"],
+ ["deviceinfo","\u0001F4F1","About this device","Browser and hardware facts","run"],
+ ["displayinfo","\u0001F5A5\uFE0F","Screen info","Size and sharpness","run"],
+ ["netinfo","\u0001F4F6","Internet type","WiFi/4G speed details","run"],
+ ["storage","\u0001F4BD","Storage space","What sites are storing here","run"],
+ ["geolocate","\u0001F4CD","Where am I?","Your GPS location","run"],
+ ["sensors","\u0001F9ED","Motion sensors","Tilt and movement readings","run"],
+ ["audioinfo","\u0001F50A","Sound devices","Speakers and microphones","run"],
+ ["clipread","\u0001F4CB","Read clipboard","What's copied right now","run"],
+ ["clipwrite","\u270F\uFE0F","Copy to clipboard","Put text on the clipboard","fill"],
+ ["vibrate","\u0001F4F3","Vibrate","Buzz the phone","run"],
+ ["wakelock","\u2600\uFE0F","Keep screen awake","Stop the screen sleeping (on/off)","fill"],
+ ["notify","\u0001F514","Pop a notification","Show a message on screen","fill"],
+ ["time","\u0001F550","Exact time","Clock, timezone, timestamps","run"],
+ ["ntpdate","\u0001F570\uFE0F","Check my clock","Is your clock fast or slow?","run"],
+ ["uuid","\u0001F194","Make an ID","A random unique ID","run"],
+ ["b64e","\u0001F524","Text to code","Turn text into paste-safe code","fill"],
+ ["b64d","\u0001F524","Code to text","Turn the code back into text","fill"],
+ ["hexdump","\u0001F522","See the bytes","Text as raw computer bytes","fill"],
+ ["aesbench","\u26A1","Encryption speed","How fast is this device?","run"]
+]],
+["\u0001F4DD Words & files", [
+ ["wordcount","\u0001F522","Count words","Words, characters, lines","fill"],
+ ["jsonfmt","\u2728","Tidy data","Make messy JSON easy to read","fill"],
+ ["json2csv","\u0001F4CA","Data to spreadsheet","Turn a list into CSV rows","fill"],
+ ["csv2json","\u0001F4CB","Spreadsheet to data","Turn CSV rows into a list","fill"],
+ ["regextest","\u0001F50D","Test a search pattern","Try a pattern, see matches","fill"],
+ ["textdiff","\u2194\uFE0F","Spot the difference","What changed between two texts","fill"],
+ ["fileb64e","\u0001F4C4","File to text","Any file as pasteable text","run"],
+ ["fileb64d","\u0001F4E5","Text to file","Pasted text back into a file","fill"],
+ ["urlencode","\u0001F517","Fix a web address","Make text URL-safe","fill"],
+ ["urldecode","\u0001F517","Read a web address","URL code back to text","fill"],
+ ["htmlesc","\u0001F6E1\uFE0F","Safe for web pages","Escape text safely","fill"],
+ ["mdpreview","\u0001F440","Preview writing","See formatted text first","fill"],
+ ["lorem","\u0001F4DD","Filler text","Placeholder text for designs","run"],
+ ["csvview","\u0001F4CA","View spreadsheet","CSV file as a neat table","run"],
+ ["textstats","\u0001F4C8","Writing stats","Reading level check","fill"],
+ ["caseconv","\u0001F520","Change CaSe","UPPER, lower, Title, camelCase","fill"]
+]],
+["\u0001F310 Internet tools", [
+ ["wstest","\u0001F50C","Test a live socket","Does a realtime address answer?","fill"],
+ ["corscheck","\u0001F6A7","Can sites read this?","Check cross-site permissions","fill"],
+ ["redirtrace","\u0001F517","Where does this link go?","Follow a short link","fill"],
+ ["secheaders","\u0001F6E1\uFE0F","Security grade","Score a site's setup","fill"],
+ ["dohcf","\u0001F50D","Find a website (Cloudflare)","Look up a domain via Cloudflare","fill"],
+ ["reqbuilder","\u0001F528","Custom web request","Send with your own headers","fill"],
+ ["restimer","\u23F1\uFE0F","Time a page load","Detailed speed breakdown","fill"],
+ ["uaparse","\u0001F575\uFE0F","What browser is this?","Decode a browser ID string","run"],
+ ["subnet","\u0001F9EE","Slice an address block","Network, range, size","fill"],
+ ["macvendor","\u0001F3ED","Who made this device?","Network card maker lookup","fill"],
+ ["httpstatus","\u2753","What does 404 mean?","Error codes in plain English","run"],
+ ["porthint","\u0001F6AA","Is a port open?","A quick hint, not a full scan","fill"]
+]],
+["\u0001F5A5\uFE0F This device", [
+ ["cookies","\u0001F36A","Website notes","What sites saved in your browser","run"],
+ ["lskeys","\u0001F5C4\uFE0F","App's saved data","What this app stored","run"],
+ ["sskeys","\u0001F4D1","Tab's temp data","This tab's temporary storage","run"],
+ ["idbkeys","\u0001F4BE","Browser databases","Databases websites keep here","run"],
+ ["histlen","\u21A9\uFE0F","Back-button count","Pages in your history","run"],
+ ["plugins","\u0001F9E9","Browser add-ons","Visible plugins","run"],
+ ["mimetypes","\u0001F4C4","File types known","What the browser can open","run"],
+ ["devorient","\u0001F4D0","Tilt meter","Which way is the device tilted?","run"],
+ ["touchinfo","\u0001F446","Touch screen?","Does it respond to touch?","run"],
+ ["pdfview","\u0001F4D6","Read a PDF","Open a PDF right here","run"],
+ ["fontlist","\u0001F524","Installed fonts","Available text styles","run"],
+ ["onoffinfo","\u0001F4F6","Online? Test offline","Status + how to fake offline","run"]
+]],
+["\u0001F3AC Camera & sound", [
+ ["imgresize","\u0001F5BC\uFE0F","Shrink a photo","Resize a picture to any size","fill"],
+ ["imgconvert","\u0001F504","Change photo type","PNG, JPG or WebP","fill"],
+ ["exifread","\u0001F4F7","Photo secrets","Hidden camera info in a photo","run"],
+ ["colorpick","\u0001F3A8","Pick a color","Grab any color from the screen","run"],
+ ["screenshot","\u0001F4F8","Screenshot","Capture screen or window","run"],
+ ["audiorec","\u0001F399\uFE0F","Record voice","A short voice clip","run"],
+ ["videorec","\u0001F3AC","Record video","A short video clip","run"],
+ ["speak","\u0001F5E3\uFE0F","Read aloud","Browser reads text to you","fill"],
+ ["stt","\u0001F3A4","Speech to text","Your words become text","run"],
+ ["metronome","\u0001F941","Metronome","Keep the music beat","run"],
+ ["tonegen","\u0001F3B5","Play a tone","A pure musical note","run"],
+ ["noisemeter","\u0001F50A","How loud here?","Measure noise around you","run"],
+ ["camsnap","\u0001F4F7","Take a photo","Snap with your camera","run"],
+ ["audiofmt","\u0001F3BC","Audio file info","Length, quality, channels","run"]
+]],
+["\u2705 Get things done", [
+ ["notes","\u0001F4DD","Notebook","Quick notes in your browser","run"],
+ ["todo","\u2705","To-do list","Tasks that track what's done","run"],
+ ["countdown","\u23F3","Countdown","Beep at zero","fill"],
+ ["stopwatch","\u23F1\uFE0F","Stopwatch","Start, stop, laps","fill"],
+ ["pomodoro","\u0001F345","Focus timer","Work bursts with breaks","run"],
+ ["calc","\u0001F9EE","Calculator","Safe math","fill"],
+ ["unitconv","\u0001F4CF","Convert units","Miles/km, lb/kg, F/C...","fill"],
+ ["tzconv","\u0001F30D","Time elsewhere","What time in another city?","fill"],
+ ["tipcalc","\u0001F9FE","Split the bill","Tips and shares","fill"],
+ ["diceroll","\u0001F3B2","Roll dice","Honestly random","run"],
+ ["coinflip","\u0001FA99","Flip a coin","Heads or tails","run"],
+ ["pickone","\u0001F914","Pick for me","Chance chooses","fill"]
+]],
+["\u0001F6E0\uFE0F Maker tools", [
+ ["colorconv","\u0001F3A8","Color translator","HEX, RGB, HSL versions","fill"],
+ ["contrast","\u0001F441\uFE0F","Readable?","Text vs background check","fill"],
+ ["csspx","\u0001F4D0","Size converter","px, rem, em, pt","fill"],
+ ["baseconv","\u0001F522","Number bases","Binary, octal, decimal, hex","fill"],
+ ["roman","\u0001F3DB\uFE0F","Roman numerals","42 becomes XLII","fill"],
+ ["morse","\u0001F4FB","Morse code","Dots and dashes, both ways","fill"],
+ ["nato","\u2708\uFE0F","Pilot alphabet","Alpha Bravo Charlie...","fill"],
+ ["qrbatch","\u0001F4F7","Many QR codes","Several at once","fill"],
+ ["urlparse","\u0001F517","Take apart a URL","Every piece explained","fill"],
+ ["crondesc","\u0001F550","Explain a schedule","Cron lines in plain English","fill"],
+ ["unicode","\u0001F523","Character codes","Secret codes behind letters","fill"],
+ ["uuid7","\u0001F194","Time-ordered ID","IDs that sort newest-first","run"]
+]],
+["\u0001F3B2 Just for fun", [
+ ["eightball","\u0001F3B1","Magic 8-ball","Ask yes-or-no","fill"],
+ ["quote","\u0001F4A1","Wisdom","A thoughtful quote","run"],
+ ["dadjoke","\u0001F923","Dad joke","So bad it's good","run"],
+ ["rps","\u270A","Rock paper scissors","Vs the computer","fill"],
+ ["fliptext","\u0001F643","Upside-down text","\u0287x\u01dd\u0287 u\u028dop \u01dds\u1d29dn","fill"],
+ ["emojistrip","\u0001F9F9","Remove emojis","Clean text up","fill"],
+ ["slugify","\u0001F517","Web address slug","Headline to tidy piece","fill"],
+ ["excerpt","\u2702\uFE0F","Short version","First few words","fill"],
+ ["repeat","\u0001F501","Repeat text","Say it many times","fill"],
+ ["sortlines","\u0001F524","Sort lines","A to Z, unique option","fill"]
+]],
+["\u0001F4CA Watch", [
+ ["mon","\u0001F4CA","Live monitors","Watch battery, network, friends","fill"],
+ ["monlist","\u0001F4CB","Monitor list","What can I watch?","run"],
+ ["help","\u2753","All commands","Full list with help","run"],
+ ["clear","\u0001F9F9","Clear screen","Wipe the terminal","run"],
+ ["theme","\u0001F3A8","Dark / light","Switch the look","run"],
+ ["alias","\u0001F3F7\uFE0F","Shortcuts","Your own nicknames","fill"],
+ ["exportcfg","\u0001F4BE","Save settings","Download a backup","run"],
+ ["reset","\u26A0\uFE0F","Erase everything","Wipe identity and data","fill"]
+]]
+];
+function showView(v) {
+  const dash = v === "dash";
+  $("dash").style.display = dash ? "block" : "none";
+  $("term").style.display = dash ? "none" : "block";
+  $("inrow").style.display = dash ? "none" : "flex";
+  if (!dash) $("mon").style.display = "none";
+  $("btn-dash").classList.toggle("on", dash);
+  $("btn-term").classList.toggle("on", !dash);
+  if (!dash) setTimeout(() => input.focus(), 50);
+}
+function renderDash(filter) {
+  const q = (filter || "").toLowerCase();
+  const g = $("dashgrid");
+  g.innerHTML = "";
+  let shown = 0;
+  for (const [cat, cards] of DASH) {
+    const hit = cards.filter((c) => !q || c[0].includes(q) || c[2].toLowerCase().includes(q) || c[3].toLowerCase().includes(q));
+    if (!hit.length) continue;
+    const h = document.createElement("div");
+    h.className = "dash-cat"; h.textContent = cat + " (" + hit.length + ")";
+    g.appendChild(h);
+    const grid = document.createElement("div");
+    grid.className = "dash-grid";
+    for (const [cmdName, icon, name, desc, mode] of hit) {
+      const el = document.createElement("div");
+      el.className = "card";
+      el.innerHTML = '<div class="ci">' + icon + '</div><div class="cn">' + esc(name) + '</div><div class="cd">' + esc(desc) + '</div><div class="cc">' + esc(cmdName) + (mode === "fill" ? " — needs input" : "") + "</div>";
+      el.onclick = () => dashClick(cmdName, mode);
+      grid.appendChild(el);
+    }
+    g.appendChild(grid);
+    shown += hit.length;
+  }
+  if (!shown) g.innerHTML = '<div class="dim" style="padding:20px">No tools match "' + esc(filter || "") + '". Try "password", "photo", "timer".</div>';
+}
+async function dashClick(cmdName, mode) {
+  if (mode === "fill") {
+    showView("term");
+    input.value = cmdName + " ";
+    setTimeout(() => input.focus(), 50);
+    return;
+  }
+  const before = term.children.length;
+  try { await runLine(cmdName); }
+  catch (e) { /* runLine already prints errors */ }
+  const rp = $("dashresult");
+  const parts = [];
+  for (let i = before; i < term.children.length; i++) parts.push(term.children[i].outerHTML);
+  rp.style.display = "block";
+  rp.innerHTML = '<span class="dim">Result</span> <b>' + esc(cmdName) + '</b>' +
+    '<button id="dr-term">Open in terminal</button><button id="dr-x">Close</button>' +
+    '<div style="margin-top:8px">' + parts.join("") + "</div>";
+  $("dr-term").onclick = () => { showView("term"); input.value = cmdName + " "; setTimeout(() => input.focus(), 50); };
+  $("dr-x").onclick = () => { rp.style.display = "none"; };
+  rp.scrollIntoView({ block: "nearest" });
+}
+$("btn-dash").onclick = () => showView("dash");
+$("btn-term").onclick = () => showView("term");
+$("dashsearch").addEventListener("input", (e) => renderDash(e.target.value));
+renderDash("");
+showView("dash");
 </script>
 </body>
 </html>
