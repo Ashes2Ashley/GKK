@@ -50,7 +50,7 @@ video { max-width:100%; border:1px solid var(--dim); }
 <div id="wrap">
   <div style="flex:1;display:flex;flex-direction:column;min-width:0">
     <div id="dash">
-      <input id="dashsearch" autocomplete="off" spellcheck="false" placeholder="Search 200 tools... try 'password', 'photo', 'timer'">
+      <input id="dashsearch" autocomplete="off" spellcheck="false" placeholder="Search tools... try 'password', 'photo', 'timer'">
       <div id="dashresult"></div>
       <div id="dashgrid"></div>
     </div>
@@ -255,7 +255,10 @@ cmd("newid", "generate a new P-256 identity (replaces current)", async () => {
 });
 cmd("myid", "show fingerprint, words, public key", async () => {
   await ensureIdentity(true);
-  println("fingerprint: " + S.idHex + "\nwords: " + S.words + "\nspki b64:\n" + S.pubB64);
+  const c = cfgAll();
+  const bound = ["imei", "sim", "devicename", "handle", "phone"].filter((k) => c[k]);
+  println("fingerprint: " + S.idHex + "\nwords: " + S.words + "\nspki b64:\n" + S.pubB64 +
+    "\ndevice: " + (bound.length ? bound.map((k) => k + "=" + maskVal(k, c[k])).join(", ") : "not bound — run: config set imei <your-imei>"));
 });
 cmd("exportkey", "download public key (.b64)", async () => {
   await ensureIdentity(true);
@@ -403,6 +406,92 @@ cmd("importpeers", "usage: importpeers <json> — paste peers JSON", async (a, l
   for (const p of arr) { try { await addPeer(p.name, p.pubB64, p.trust || 0); n++; } catch (e) {} }
   println("imported " + n + " peer(s)");
 });
+/* ---------- My setup: optional device/service config (IMEI, SIM, ...) ---------- */
+/* Everything here stays in this browser's local storage. Nothing is sent anywhere
+   unless you explicitly share your device card (attest-send). Browsers cannot read
+   your IMEI themselves, so you type it once and the app adapts to it. */
+const CFG_KEYS = {
+  imei: "Phone IMEI — the 15-digit hardware serial (dial *#06# to see it)",
+  sim: "SIM card number (ICCID) — the long number printed on your SIM",
+  phone: "Phone number",
+  devicename: "Device name — e.g. My iPhone",
+  handle: "Your display name",
+  sigserver: "Signaling helper server (wss://...) for swapping connection info",
+  stun: "STUN server — helps find your network address",
+  turn: "TURN relay (user:pass@host:port) — for networks that block direct links",
+  apn: "APN name — your carrier's data gateway, for reference"
+};
+const CFG_SENSITIVE = new Set(["imei", "sim", "phone", "turn"]);
+function cfgAll() { return store.get("config", {}); }
+function cfgGet(k) { const c = cfgAll(); return c[k] !== undefined ? c[k] : null; }
+function cfgSetKV(k, v) { const c = cfgAll(); c[k] = v; store.set("config", c); }
+function cfgDelK(k) { const c = cfgAll(); delete c[k]; store.set("config", c); }
+function maskVal(k, v) {
+  if (v === null || v === undefined || v === "") return "—";
+  v = String(v);
+  if (CFG_SENSITIVE.has(k) && v.length > 4) return v.slice(0, 2) + "••••••" + v.slice(-2);
+  return v;
+}
+function imeiCheck(s) {
+  const d = String(s).replace(/[\s-]/g, "");
+  if (!/^\d{14,16}$/.test(d)) return "an IMEI is 14–16 digits — check it and try again";
+  if (d.length === 15) {
+    let sum = 0;
+    for (let i = 0; i < 15; i++) { let n = +d[i]; if (i % 2 === 1) { n *= 2; if (n > 9) n -= 9; } sum += n; }
+    if (sum % 10 !== 0) return "check digit failed — one of the digits is wrong";
+  }
+  return null;
+}
+cmd("config", "save your IMEI, SIM and other setup — the app adapts to it", async (a, line) => {
+  const sub = (a[0] || "show").toLowerCase();
+  if (sub === "show" || sub === "list") {
+    const c = cfgAll(), keys = Object.keys(c);
+    if (!keys.length) {
+      println("nothing saved yet — everything here is optional.\n" +
+        "examples:\n  config set imei 350000000000001\n  config set sim 8901000000000000000\n  config set devicename My iPhone\n  config set sigserver wss://example.com/sig\n" +
+        "known keys: " + Object.keys(CFG_KEYS).join(", ") + "\n(any other name works too — it's your notebook)\n" +
+        "— stored only in this browser; shown masked here; reveal one fully with: config get <key>");
+      return;
+    }
+    println(keys.map((k) => k + ": " + maskVal(k, c[k]) + (CFG_KEYS[k] ? "" : "  (custom)")).join("\n") +
+      "\n— stored only in this browser, never sent unless you share your device card —");
+    return;
+  }
+  if (sub === "set") {
+    const k = (a[1] || "").toLowerCase();
+    if (!k) throw new Error("usage: config set <key> <value>   e.g. config set imei 350000000000001");
+    const km = new RegExp("^config\\s+set\\s+" + k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s+", "i").exec(line);
+    const v = (km ? line.slice(km[0].length) : a.slice(2).join(" ")).trim();
+    if (!v) throw new Error("give a value: config set " + k + " <value>");
+    if (k === "imei") { const bad = imeiCheck(v); if (bad) throw new Error("that IMEI doesn't look right: " + bad); }
+    if (k === "sim" && !/^\d{15,22}$/.test(v.replace(/[\s-]/g, ""))) throw new Error("a SIM number (ICCID) is 15–22 digits — check it and try again");
+    cfgSetKV(k, v);
+    println(k + " saved." + (CFG_KEYS[k] ? " " + CFG_KEYS[k].split(" — ")[0] + "." : " (custom key)") +
+      (["imei", "sim", "phone", "devicename", "handle"].includes(k) ? " Your device card (attest) now carries it." : ""));
+    return;
+  }
+  if (sub === "get") {
+    const k = (a[1] || "").toLowerCase();
+    if (!k) throw new Error("usage: config get <key>");
+    const v = cfgGet(k);
+    println(v === null ? "nothing saved under '" + k + "'" : k + ": " + v);
+    return;
+  }
+  if (sub === "del" || sub === "delete" || sub === "rm") {
+    const k = (a[1] || "").toLowerCase();
+    if (!k) throw new Error("usage: config del <key>");
+    cfgDelK(k);
+    println(k + " removed.");
+    return;
+  }
+  if (sub === "reset" || sub === "clear") {
+    const n = Object.keys(cfgAll()).length;
+    store.set("config", {});
+    println(n ? n + " saved value(s) cleared." : "nothing was saved.");
+    return;
+  }
+  throw new Error("usage: config [show] | config set <key> <value> | config get <key> | config del <key> | config reset");
+});
 cmd("attest", "show this device's claim (browser fingerprint)", async () => {
   const c = await myClaim();
   println(JSON.stringify(c, null, 2));
@@ -420,11 +509,15 @@ cmd("attest-verify", "usage: attest-verify <peer>", async (a) => {
 });
 async function myClaim() {
   const nav = navigator;
-  return {
+  const claim = {
     ua: nav.userAgent, platform: nav.platform, cores: nav.hardwareConcurrency || null,
     memGB: nav.deviceMemory || null, tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
     screen: screen.width + "x" + screen.height, id: S.idHex, at: Date.now()
   };
+  // fold in whatever the user configured (imei, sim, phone, devicename, handle...)
+  const c = cfgAll();
+  for (const k of ["devicename", "handle", "imei", "sim", "phone"]) if (c[k]) claim[k] = c[k];
+  return claim;
 }
 function handleAttest(peer, body) {
   const prev = store.get("attest." + peer.idHex, null);
@@ -583,9 +676,10 @@ cmd("dclog", "recent data-channel events", async () => {
   println(S.dcLog.slice(-20).join("\n") || "(empty)");
 });
 cmd("sigset", "usage: sigset <wss-url> — optional signaling server", async (a) => {
-  if (!a[0]) throw new Error("usage: sigset <wss-url>");
-  S.wsUrl = a[0]; store.set("wsUrl", a[0]);
-  println("signaling server: " + a[0]);
+  const url = a[0] || cfgGet("sigserver");
+  if (!url) throw new Error("usage: sigset <wss-url>  (or save a default: config set sigserver wss://...)");
+  S.wsUrl = url; store.set("wsUrl", url);
+  println("signaling server: " + url);
 });
 cmd("sigsend", "usage: sigsend <room> <json> — send via signaling server", async (a, line) => {
   if (!S.wsUrl) throw new Error("sigset first");
@@ -1104,7 +1198,7 @@ cmd("reset", "usage: reset yes — wipe everything", async (a) => {
     refreshHead();
     print('<span class="acc">GKK/Web</span> <span class="dim">— encrypted dispatch console (Envelope v1, byte-exact with Android)</span>');
     println("identity " + S.idHex.slice(0, 16) + "…  words: " + S.words);
-    println("200 features — type 'help'. Data links: rtcoffer <peer> / rtcanswer / rtcaccept. Calls: vcoffer <peer> [--video].");
+    println(Object.keys(CMDS).length + " features — type 'help'. Data links: rtcoffer <peer> / rtcanswer / rtcaccept. Calls: vcoffer <peer> [--video].");
   } catch (e) {
     print("init failed: " + e.message + " (private mode? IndexedDB is required)", "err");
   }
@@ -2353,7 +2447,7 @@ cmd("sortlines", "sort lines A to Z (add -u for unique only)", async (a, line) =
 </script>
 <script>
 "use strict";
-/* ---------- Visual dashboard (200 tools, plain English) ---------- */
+/* ---------- Visual dashboard (plain English) ---------- */
 /* each card: [command, icon, plain name, layman's description, mode]  mode: run = one click, fill = needs your input */
 const DASH = [
 ["\u0001F510 Lock it up", [
@@ -2370,7 +2464,8 @@ const DASH = [
  ["sha256","#\uFE0F\u20E3","Fingerprint text","Make a unique fingerprint of any text","fill"],
  ["sha512","#\uFE0F\u20E3","Stronger fingerprint","A longer fingerprint of any text","fill"],
  ["hmac","\u0001F50F","Stamp text with a key","Prove text came from whoever holds the secret key","fill"],
- ["rand","\u0001F3B2","Random bytes","Make random secret bytes for keys and tokens","run"]
+ ["rand","\u0001F3B2","Random bytes","Make random secret bytes for keys and tokens","run"],
+ ["config","\u2699\uFE0F","My setup","Save your IMEI, SIM and settings \u2014 the app adapts","run"]
 ]],
 ["\u0001F50F Secret tools", [
  ["passphrase","\u0001F511","Easy strong password","A password of random words you can actually remember","run"],
@@ -2646,6 +2741,7 @@ async function dashClick(cmdName, mode) {
 $("btn-dash").onclick = () => showView("dash");
 $("btn-term").onclick = () => showView("term");
 $("dashsearch").addEventListener("input", (e) => renderDash(e.target.value));
+$("dashsearch").placeholder = "Search " + Object.keys(CMDS).length + " tools... try 'password', 'photo', 'timer'";
 renderDash("");
 showView("dash");
 </script>
