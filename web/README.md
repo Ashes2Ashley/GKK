@@ -1,4 +1,4 @@
-# GKK/Web — encrypted dispatch console (100 features)
+# GKK/Web — encrypted dispatch console (200 features)
 
 Static single-page web console for the GKK protocol. No build step, no
 framework — host `index.html` + `gkk-crypto.js` on any static host
@@ -38,7 +38,7 @@ framework — host `index.html` + `gkk-crypto.js` on any static host
 - `myip` needs UDP to a STUN server; symmetric/restrictive NATs may yield
   no srflx candidate.
 
-## The 100 features
+## The 200 features
 
 Identity & crypto (14): `newid myid exportkey importkey seal openenv
 selftest words qrgen qrscan sha256 sha512 hmac rand`
@@ -61,7 +61,34 @@ clipwrite vibrate wakelock notify time ntpdate uuid b64e b64d hexdump aesbench`
 
 Monitors + app (8): `mon monlist help clear theme alias exportcfg reset`
 
-Run `help` in the console for usage of each.
+Crypto & secret tools (12): `passphrase totp pbkdf2 esign everify jwtdecode
+lock unlock entropy certinfo hmacfile wrapdemo`
+
+Text & data (16): `wordcount jsonfmt json2csv csv2json regextest textdiff
+fileb64e fileb64d urlencode urldecode htmlesc mdpreview lorem csvview textstats
+caseconv`
+
+Network++ (12): `wstest corscheck redirtrace secheaders dohcf reqbuilder
+restimer uaparse subnet macvendor httpstatus porthint`
+
+System & browser (12): `cookies lskeys sskeys idbkeys histlen plugins mimetypes
+devorient touchinfo pdfview fontlist onoffinfo`
+
+Media (14): `imgresize imgconvert exifread colorpick screenshot audiorec
+videorec speak stt metronome tonegen noisemeter camsnap audiofmt`
+
+Productivity (12): `notes todo countdown stopwatch pomodoro calc unitconv tzconv
+tipcalc diceroll coinflip pickone`
+
+Dev tools (12): `colorconv contrast csspx baseconv roman morse nato qrbatch
+urlparse crondesc unicode uuid7`
+
+Fun & utility (10): `eightball quote dadjoke rps fliptext emojistrip slugify
+excerpt repeat sortlines`
+
+Run `help` in the console for usage of each. A visual dashboard (big
+clickable cards, plain-English names, search filter) sits above the terminal
+— click a card to run a tool or prefill the terminal.
 
 ## Two-browser test
 
