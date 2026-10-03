@@ -1,0 +1,1094 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GKK Web — Encrypted Dispatch Console</title>
+<style>
+:root { --bg:#0a0e0a; --fg:#c8f0c8; --dim:#6a8a6a; --acc:#4ade80; --warn:#fbbf24; --err:#f87171; }
+body.light { --bg:#f4f4f0; --fg:#1a2a1a; --dim:#6a7a6a; --acc:#166534; --warn:#b45309; --err:#b91c1c; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font-family:ui-monospace,Menlo,Consolas,monospace; font-size:14px; }
+#head { padding:10px 14px; border-bottom:1px solid var(--dim); display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+#head b { color:var(--acc); }
+#head .pill { border:1px solid var(--dim); border-radius:10px; padding:2px 8px; font-size:12px; }
+#wrap { display:flex; height:calc(100vh - 49px); }
+#term { flex:1; overflow-y:auto; padding:12px 14px; white-space:pre-wrap; word-break:break-word; }
+#side { width:260px; border-left:1px solid var(--dim); padding:10px; overflow-y:auto; font-size:12px; }
+#side h4 { margin:8px 0 4px; color:var(--acc); font-size:12px; }
+#inrow { display:flex; border-top:1px solid var(--dim); }
+#ps1 { padding:12px 4px 12px 14px; color:var(--acc); }
+#cmd { flex:1; background:transparent; border:0; color:var(--fg); font:inherit; padding:12px 14px 12px 0; outline:none; }
+.dim { color:var(--dim); } .acc { color:var(--acc); } .warn { color:var(--warn); } .err { color:var(--err); }
+#mon { border-top:1px dashed var(--dim); margin-top:8px; padding-top:8px; display:none; }
+video { max-width:100%; border:1px solid var(--dim); }
+@media (max-width:700px){ #side{ display:none; } }
+</style>
+</head>
+<body>
+<div id="head">
+  <b>GKK/WEB</b><span class="dim">encrypted dispatch console</span>
+  <span class="pill" id="h-id">no identity</span>
+  <span class="pill" id="h-rtc">rtc: down</span>
+  <span class="pill" id="h-peers">peers: 0</span>
+</div>
+<div id="wrap">
+  <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+    <div id="term"></div>
+    <div id="mon"></div>
+    <div id="inrow"><span id="ps1">gkk&gt;</span><input id="cmd" autocomplete="off" spellcheck="false" placeholder="type 'help'"></div>
+  </div>
+  <div id="side">
+    <h4>PEERS</h4><div id="side-peers" class="dim">none</div>
+    <h4>LINK</h4><div id="side-link" class="dim">no connection</div>
+    <h4>CALL</h4><div id="side-call" class="dim">idle</div>
+    <div id="vids"></div>
+  </div>
+</div>
+<script src="gkk-crypto.js"></script>
+<script>
+"use strict";
+/* ---------- tiny utils ---------- */
+const $ = (id) => document.getElementById(id);
+const term = $("term"), input = $("cmd");
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function print(s, cls) { const d = document.createElement("div"); if (cls) d.className = cls; d.innerHTML = s; term.appendChild(d); term.scrollTop = term.scrollHeight; }
+function println(s) { print(esc(s)); }
+const b64e = (b) => GkkCrypto.b64encode(b);
+const b64d = (s) => GkkCrypto.b64decode(s);
+const hex = (b) => GkkCrypto.hex(b);
+const utf8 = (s) => GkkCrypto.utf8(s);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* ---------- persistent state ---------- */
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("gkk." + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem("gkk." + k, JSON.stringify(v)); } catch (e) {} },
+  del(k) { localStorage.removeItem("gkk." + k); }
+};
+const S = {
+  idHex: null, words: null, pubB64: null,
+  peers: new Map(),   // name -> {name, pubB64, pubKey, idHex, trust, seqSend, seqSeen, lastSeen, online}
+  inbox: [],          // {id, from, kind, text, ts}
+  ackWait: new Map(), // tag -> t0
+  rtt: null,
+  pc: null, dc: null, dcLog: [],
+  mpc: null, mstream: null, rstream: null, rec: null, recChunks: [],
+  wsUrl: null,
+  hbTimer: null, monTimer: null, wdTimer: null,
+  aliases: store.get("aliases", {}),
+  theme: store.get("theme", "dark"),
+  files: new Map(),  // fileId -> {name, size, sha256, chunks: Map, total}
+};
+function savePeers() {
+  store.set("peers", [...S.peers.values()].map((p) => ({
+    name: p.name, pubB64: p.pubB64, trust: p.trust, seqSend: p.seqSend, seqSeen: p.seqSeen })));
+}
+function saveInbox() { store.set("inbox", S.inbox.slice(-300)); }
+function refreshHead() {
+  $("h-id").textContent = S.idHex ? S.idHex.slice(0, 12) + "…" : "no identity";
+  $("h-peers").textContent = "peers: " + S.peers.size;
+  const online = [...S.peers.values()].filter((p) => p.online).length;
+  $("side-peers").innerHTML = S.peers.size ? [...S.peers.values()].map((p) =>
+    esc(p.name) + ' <span class="' + (p.online ? "acc" : "dim") + '">●</span>' +
+    ' <span class="dim">' + esc(p.idHex.slice(0, 8)) + (p.trust >= 100 ? " [admin]" : "") + "</span>").join("<br>") : "none";
+}
+
+/* ---------- identity (IndexedDB; private key never leaves) ---------- */
+function idb() { return new Promise((res, rej) => {
+  const r = indexedDB.open("gkk", 1);
+  r.onupgradeneeded = () => r.result.createObjectStore("keys");
+  r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+async function keyStore(kp) { const db = await idb(); return new Promise((res, rej) => {
+  const t = db.transaction("keys", "readwrite"); t.objectStore("keys").put(kp, "identity");
+  t.oncomplete = () => res(); t.onerror = () => rej(t.error); }); }
+async function keyLoad() { const db = await idb(); return new Promise((res, rej) => {
+  const t = db.transaction("keys", "readonly"); const q = t.objectStore("keys").get("identity");
+  q.onsuccess = () => res(q.result || null); q.onerror = () => rej(q.error); }); }
+async function ensureIdentity(silent) {
+  let kp = await keyLoad();
+  if (!kp) {
+    kp = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
+    await keyStore(kp);
+    if (!silent) print("new identity generated", "acc");
+  }
+  const spki = new Uint8Array(await crypto.subtle.exportKey("spki", kp.publicKey));
+  const id = await GkkCrypto.deviceId(spki);
+  S.idHex = GkkCrypto.deviceIdHex(id);
+  S.words = GkkCrypto.verificationWords(id);
+  S.pubB64 = b64e(spki);
+  S._kp = kp; S._id = id;
+  refreshHead();
+  return kp;
+}
+
+/* ---------- envelope send/receive ---------- */
+async function sealFor(peer, kind, body) {
+  const seq = (peer.seqSend || 0) + 1;
+  const tag = Math.random().toString(36).slice(2, 10);
+  const pt = utf8(JSON.stringify({ kind, tag, body }));
+  const env = await GkkCrypto.seal(S._kp.privateKey, S._id, peer.pubKey, idToBytes(peer), seq, pt);
+  peer.seqSend = seq; savePeers();
+  return { env, tag };
+}
+// peer.idHex is hex string; keep raw bytes cached
+function idToBytes(peer) { if (!peer._idb) { const h = peer.idHex; const b = new Uint8Array(8); for (let i = 0; i < 8; i++) b[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16); peer._idb = b; } return peer._idb; }
+async function routeEnvelope(fromPeer, env) {
+  let opened;
+  try {
+    opened = await GkkCrypto.open(S._kp.privateKey, S._id, fromPeer.pubKey, idToBytes(fromPeer), env, fromPeer.seqSeen || 0);
+  } catch (e) { print("dropped envelope from " + fromPeer.name + ": " + e.message, "err"); return; }
+  fromPeer.seqSeen = opened.seq; fromPeer.lastSeen = Date.now(); fromPeer.online = true; savePeers(); refreshHead();
+  let obj;
+  try { obj = JSON.parse(new TextDecoder().decode(opened.plaintext)); }
+  catch (e) { inboxAdd(fromPeer, "raw", new TextDecoder().decode(opened.plaintext).slice(0, 500)); return; }
+  const body = obj.body || {};
+  routeMessage(fromPeer, obj.kind, obj.tag, body);
+}
+function inboxAdd(peer, kind, text) {
+  S.inbox.push({ id: Date.now() + "-" + Math.random().toString(36).slice(2, 6), from: peer.name, kind, text, ts: Date.now() });
+  saveInbox();
+}
+async function routeMessage(peer, kind, tag, body) {
+  switch (kind) {
+    case "msg": inboxAdd(peer, "msg", body.text || ""); print('<span class="acc">[' + esc(peer.name) + "]</span> " + esc(body.text || "")); sendKind(peer, "ack", { for: tag }).catch(() => {}); break;
+    case "ack": { const t0 = S.ackWait.get(body.for); if (t0) { S.rtt = Date.now() - t0; S.ackWait.delete(body.for); print("ack from " + peer.name + " rtt=" + S.rtt + "ms", "dim"); } break; }
+    case "hb": peer.batt = body.batt; peer.lastSeen = Date.now(); peer.online = true; refreshHead(); break;
+    case "typing": print(peer.name + " is typing…", "dim"); break;
+    case "sos": inboxAdd(peer, "sos", body.text || ""); print('<span class="err">SOS from ' + esc(peer.name) + ": " + esc(body.text || "") + "</span>"); break;
+    case "attest": handleAttest(peer, body); break;
+    case "ping": sendKind(peer, "pong", { for: body.t }); break;
+    case "pong": { const t0 = S.ackWait.get("ping-" + peer.name); if (t0) { S.rtt = Date.now() - t0; print("pong " + peer.name + " " + S.rtt + "ms", "dim"); } break; }
+    case "file-meta": fileMeta(peer, body); break;
+    case "file-chunk": fileChunk(peer, body); break;
+    default: inboxAdd(peer, kind, JSON.stringify(body).slice(0, 500));
+  }
+}
+async function sendKind(peer, kind, body) {
+  const { env, tag } = await sealFor(peer, kind, body);
+  const sent = dcSendBytesTo(peer, env);
+  return { env, tag, sent };
+}
+function dcSendBytesTo(peer, env) {
+  const l = S.links.get(peer.name);
+  if (l && l.dc && l.dc.readyState === "open") { l.dc.send(env); S.dcLog.push(Date.now() + " sent " + env.length + "B to " + peer.name); return true; }
+  return false;
+}
+function dcSendBytes(env) { // legacy: sends on the first open link
+  for (const [, l] of S.links) if (l.dc && l.dc.readyState === "open") { l.dc.send(env); return true; }
+  return false;
+}
+</script>
+<script>
+"use strict";
+/* ---------- command framework ---------- */
+const CMDS = {};
+function cmd(name, help, fn) { CMDS[name] = { help, fn }; }
+const hist = []; let hi = 0;
+async function runLine(line) {
+  print('<span class="acc">gkk&gt;</span> ' + esc(line));
+  const parts = line.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return;
+  const name = S.aliases[parts[0].toLowerCase()] || parts[0].toLowerCase();
+  const c = CMDS[name];
+  if (!c) { print("unknown command: " + esc(parts[0]) + " — try 'help'", "err"); return; }
+  try { await c.fn(parts.slice(1), line); } catch (e) { print("error: " + e.message, "err"); }
+}
+input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { const v = input.value; input.value = ""; hist.push(v); hi = hist.length; runLine(v); }
+  else if (e.key === "ArrowUp") { if (hi > 0) hi--; input.value = hist[hi] || ""; e.preventDefault(); }
+  else if (e.key === "ArrowDown") { if (hi < hist.length) hi++; input.value = hi < hist.length ? hist[hi] : ""; e.preventDefault(); }
+});
+
+/* ---------- peers ---------- */
+function needPeer(name) { const p = S.peers.get(name); if (!p) throw new Error("no such peer: '" + name + "'"); return p; }
+async function addPeer(name, pubB64, trust) {
+  const spki = b64d(pubB64.replace(/\s/g, ""));
+  const pubKey = await GkkCrypto.importPeerPublicKey(spki);
+  const id = await GkkCrypto.deviceId(spki);
+  const peer = { name, pubB64, pubKey, idHex: GkkCrypto.deviceIdHex(id),
+    trust: trust || 0, seqSend: 0, seqSeen: 0, lastSeen: 0, online: false };
+  S.peers.set(name, peer); savePeers(); refreshHead();
+  return peer;
+}
+async function loadPeers() {
+  for (const p of store.get("peers", [])) {
+    try { await addPeer(p.name, p.pubB64, p.trust);
+      const q = S.peers.get(p.name); q.seqSend = p.seqSend || 0; q.seqSeen = p.seqSeen || 0;
+    } catch (e) { /* bad stored key */ }
+  }
+  savePeers();
+}
+function lazyScript(src) {
+  return new Promise((res, rej) => {
+    const s = document.createElement("script"); s.src = src;
+    s.onload = () => res(true); s.onerror = () => rej(new Error("CDN unreachable (offline?)"));
+    document.head.appendChild(s);
+  });
+}
+
+/* ---------- A. identity & crypto (14) ---------- */
+cmd("newid", "generate a new P-256 identity (replaces current)", async () => {
+  await new Promise((res) => { const r = indexedDB.deleteDatabase("gkk"); r.onsuccess = res; r.onerror = res; });
+  S._kp = null; S._id = null;
+  await ensureIdentity(); println("identity: " + S.idHex + "\nwords: " + S.words);
+});
+cmd("myid", "show fingerprint, words, public key", async () => {
+  await ensureIdentity(true);
+  println("fingerprint: " + S.idHex + "\nwords: " + S.words + "\nspki b64:\n" + S.pubB64);
+});
+cmd("exportkey", "download public key (.b64)", async () => {
+  await ensureIdentity(true);
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([S.pubB64], { type: "text/plain" }));
+  a.download = "gkk-pubkey.b64"; a.click();
+  println("downloaded gkk-pubkey.b64");
+});
+cmd("importkey", "usage: importkey <spki-base64> — validate a peer key", async (a) => {
+  if (!a[0]) throw new Error("usage: importkey <spki-base64>");
+  const spki = b64d(a[0].replace(/\s/g, ""));
+  await GkkCrypto.importPeerPublicKey(spki);
+  const id = GkkCrypto.deviceIdHex(await GkkCrypto.deviceId(spki));
+  println("valid P-256 key, fingerprint: " + id);
+});
+cmd("seal", "usage: seal <peer> <text> — print sealed envelope hex", async (a) => {
+  const p = needPeer(a[0]); const text = a.slice(1).join(" ");
+  if (!text) throw new Error("usage: seal <peer> <text>");
+  const { env, tag } = await sealFor(p, "msg", { text });
+  println("tag=" + tag + " (" + env.length + " bytes)\n" + hex(env));
+});
+cmd("openenv", "usage: openenv <peer> <hex> — decrypt+verify an envelope", async (a) => {
+  const p = needPeer(a[0]);
+  if (!a[1]) throw new Error("usage: openenv <peer> <hex>");
+  const raw = a[1].replace(/\s/g, "");
+  const env = new Uint8Array(raw.length / 2);
+  for (let i = 0; i < env.length; i++) env[i] = parseInt(raw.slice(i * 2, i * 2 + 2), 16);
+  const opened = await GkkCrypto.open(S._kp.privateKey, S._id, p.pubKey, idToBytes(p), env, p.seqSeen || 0);
+  p.seqSeen = opened.seq; savePeers();
+  println("OK seq=" + opened.seq + "\n" + new TextDecoder().decode(opened.plaintext));
+});
+cmd("selftest", "live seal/open round-trip + tamper rejection (proves the crypto)", async () => {
+  const A = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+  const B = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+  const aSpki = new Uint8Array(await crypto.subtle.exportKey("spki", A.publicKey));
+  const bSpki = new Uint8Array(await crypto.subtle.exportKey("spki", B.publicKey));
+  const aId = await GkkCrypto.deviceId(aSpki), bId = await GkkCrypto.deviceId(bSpki);
+  const env = await GkkCrypto.seal(A.privateKey, aId, B.publicKey, bId, 1, utf8("selftest"));
+  const opened = await GkkCrypto.open(B.privateKey, bId, A.publicKey, aId, env, 0);
+  const rt = new TextDecoder().decode(opened.plaintext) === "selftest";
+  const bad = new Uint8Array(env); bad[60] ^= 1;
+  let tamper = false;
+  try { await GkkCrypto.open(B.privateKey, bId, A.publicKey, aId, bad, 0); } catch (e) { tamper = true; }
+  print("round-trip: " + (rt ? '<span class="acc">OK</span>' : '<span class="err">FAIL</span>') +
+    " tamper-reject: " + (tamper ? '<span class="acc">OK</span>' : '<span class="err">FAIL</span>'));
+});
+cmd("words", "usage: words [peer] — 4-word verification code", async (a) => {
+  await ensureIdentity(true);
+  if (!a[0]) { println(S.words); return; }
+  const p = needPeer(a[0]);
+  println(GkkCrypto.verificationWords(idToBytes(p)) + "  (" + p.name + ")");
+});
+cmd("qrgen", "QR code of pairing bundle (needs network for QR lib once)", async () => {
+  await ensureIdentity(true);
+  try { if (!window.qrcode) await lazyScript("https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"); }
+  catch (e) { throw new Error("QR library unreachable — offline?"); }
+  const bundle = JSON.stringify({ v: 1, id: S.idHex, pub: S.pubB64 });
+  const qr = qrcode(0, "M"); qr.addData(bundle); qr.make();
+  print('<img src="' + qr.createDataURL(4, 8) + '" alt="pairing QR"><div class="dim">scan with qrscan on the other device</div>');
+});
+cmd("qrscan", "scan a pairing QR with the camera", async () => {
+  try { if (!window.jsQR) await lazyScript("https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.min.js"); }
+  catch (e) { throw new Error("QR library unreachable — offline?"); }
+  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+  print('<video id="qrv" autoplay playsinline style="max-width:320px"></video><div class="dim">point at the QR…</div>');
+  const v = $("qrv"); v.srcObject = stream;
+  await new Promise((res) => { v.onloadedmetadata = res; });
+  const cv = document.createElement("canvas"); const cx = cv.getContext("2d");
+  const found = await new Promise((res) => {
+    const t = setInterval(() => {
+      cv.width = v.videoWidth; cv.height = v.videoHeight;
+      cx.drawImage(v, 0, 0);
+      const d = cx.getImageData(0, 0, cv.width, cv.height);
+      const code = jsQR(d.data, d.width, d.height);
+      if (code) { clearInterval(t); res(code.data); }
+    }, 300);
+    setTimeout(() => { clearInterval(t); res(null); }, 60000);
+  });
+  stream.getTracks().forEach((t) => t.stop()); v.remove();
+  if (!found) throw new Error("no QR found in 60s");
+  const b = JSON.parse(found);
+  if (b.v !== 1 || !b.pub) throw new Error("not a GKK pairing code");
+  const name = prompt("peer name:", "peer-" + b.id.slice(0, 6)) || ("peer-" + b.id.slice(0, 6));
+  const p = await addPeer(name, b.pub, 0);
+  println("paired " + p.name + " [" + p.idHex.slice(0, 12) + "…]\nverify words out-of-band: " + GkkCrypto.verificationWords(idToBytes(p)));
+});
+function hashCmd(name, algo) {
+  cmd(name, "usage: " + name + " <text>", async (a) => {
+    const t = a.join(" "); if (!t) throw new Error("usage: " + name + " <text>");
+    println(hex(new Uint8Array(await crypto.subtle.digest(algo, utf8(t)))));
+  });
+}
+hashCmd("sha256", "SHA-256"); hashCmd("sha512", "SHA-512");
+cmd("hmac", "usage: hmac <key-hex> <text>", async (a) => {
+  if (a.length < 2) throw new Error("usage: hmac <key-hex> <text>");
+  const kb = new Uint8Array(a[0].length / 2);
+  for (let i = 0; i < kb.length; i++) kb[i] = parseInt(a[0].slice(i * 2, i * 2 + 2), 16);
+  const k = await crypto.subtle.importKey("raw", kb, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", k, utf8(a.slice(1).join(" ")));
+  println(hex(new Uint8Array(sig)));
+});
+cmd("rand", "usage: rand [bytes] — secure random hex", async (a) => {
+  const n = Math.min(1024, Math.max(1, parseInt(a[0] || "32", 10) || 32));
+  println(hex(crypto.getRandomValues(new Uint8Array(n))));
+});
+
+/* ---------- B. peers (10) ---------- */
+cmd("trust", "usage: trust <name> <spki-base64>", async (a) => {
+  if (a.length < 2) throw new Error("usage: trust <name> <spki-base64>");
+  const p = await addPeer(a[0], a.slice(1).join(""), 0);
+  println("paired " + p.name + " [" + p.idHex + "]\nwords: " + GkkCrypto.verificationWords(idToBytes(p)));
+});
+cmd("peers", "list paired peers", async () => {
+  if (!S.peers.size) { println("(none)"); return; }
+  println([...S.peers.values()].map((p) =>
+    p.name + "  " + p.idHex.slice(0, 16) + "  trust=" + p.trust +
+    (p.trust >= 100 ? " [admin]" : "") + "  " + (p.online ? "online" : "last seen " + (p.lastSeen ? new Date(p.lastSeen).toLocaleString() : "never"))
+  ).join("\n"));
+});
+cmd("untrust", "usage: untrust <name>", async (a) => {
+  const p = needPeer(a[0]); S.peers.delete(p.name); savePeers(); refreshHead();
+  println("removed " + p.name);
+});
+cmd("trustlevel", "usage: trustlevel <name> <0-100+>", async (a) => {
+  const p = needPeer(a[0]); const n = parseInt(a[1], 10);
+  if (isNaN(n) || n < 0) throw new Error("usage: trustlevel <name> <0-100+>");
+  p.trust = n; savePeers(); refreshHead();
+  println(p.name + " trust=" + n + (n >= 100 ? " [admin]" : ""));
+});
+cmd("peerinfo", "usage: peerinfo <name>", async (a) => {
+  const p = needPeer(a[0]);
+  println("name: " + p.name + "\nfingerprint: " + p.idHex + "\nwords: " + GkkCrypto.verificationWords(idToBytes(p)) +
+    "\ntrust: " + p.trust + "\nseq sent/seem: " + p.seqSend + "/" + p.seqSeen +
+    "\nlast seen: " + (p.lastSeen ? new Date(p.lastSeen).toLocaleString() : "never"));
+});
+cmd("exportpeers", "download peers JSON", async () => {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(store.get("peers", []), null, 2)], { type: "application/json" }));
+  a.download = "gkk-peers.json"; a.click(); println("downloaded gkk-peers.json");
+});
+cmd("importpeers", "usage: importpeers <json> — paste peers JSON", async (a, line) => {
+  const j = line.slice(line.indexOf(" ") + 1);
+  const arr = JSON.parse(j);
+  let n = 0;
+  for (const p of arr) { try { await addPeer(p.name, p.pubB64, p.trust || 0); n++; } catch (e) {} }
+  println("imported " + n + " peer(s)");
+});
+cmd("attest", "show this device's claim (browser fingerprint)", async () => {
+  const c = await myClaim();
+  println(JSON.stringify(c, null, 2));
+});
+cmd("attest-send", "usage: attest-send <peer>", async (a) => {
+  const p = needPeer(a[0]);
+  const r = await sendKind(p, "attest", await myClaim());
+  println(r.sent ? "claim sent to " + p.name : "not connected — establish the data channel first");
+});
+cmd("attest-verify", "usage: attest-verify <peer>", async (a) => {
+  const p = needPeer(a[0]);
+  const stored = store.get("attest." + p.idHex, null);
+  if (!stored) { println("no stored claim for " + p.name + " — ask them to attest-send"); return; }
+  println(JSON.stringify(stored, null, 2));
+});
+async function myClaim() {
+  const nav = navigator;
+  return {
+    ua: nav.userAgent, platform: nav.platform, cores: nav.hardwareConcurrency || null,
+    memGB: nav.deviceMemory || null, tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    screen: screen.width + "x" + screen.height, id: S.idHex, at: Date.now()
+  };
+}
+function handleAttest(peer, body) {
+  const prev = store.get("attest." + peer.idHex, null);
+  store.set("attest." + peer.idHex, body);
+  inboxAdd(peer, "attest", "claim stored");
+  if (prev && JSON.stringify([prev.ua, prev.platform, prev.screen]) !== JSON.stringify([body.ua, body.platform, body.screen])) {
+    print('<span class="err">ATTESTATION CHANGE on ' + esc(peer.name) + " — device fingerprint differs!</span>");
+  } else print("attestation claim stored from " + peer.name, "acc");
+}
+</script>
+<script>
+"use strict";
+/* ---------- C. WebRTC data links (16) ---------- */
+S.links = new Map();
+function linkFor(name) { const l = S.links.get(name); if (!l) throw new Error("no link for '" + name + "' — run rtcoffer " + name); return l; }
+function updateLink() {
+  const n = [...S.links.values()].filter((l) => l.dc && l.dc.readyState === "open").length;
+  $("h-rtc").textContent = "rtc: " + n + " link(s)";
+  $("side-link").textContent = S.links.size ? [...S.links.entries()].map(([k, l]) =>
+    k + ": " + (l.pc ? l.pc.connectionState : "?") + "/" + (l.dc ? l.dc.readyState : "?")).join("\n") : "no connection";
+}
+function waitGathering(pc) {
+  return new Promise((res) => {
+    if (pc.iceGatheringState === "complete") return res();
+    const f = () => { if (pc.iceGatheringState === "complete") { pc.removeEventListener("icegatheringstatechange", f); res(); } };
+    pc.addEventListener("icegatheringstatechange", f);
+    setTimeout(res, 20000);
+  });
+}
+function attachDC(peer, dc) {
+  const l = S.links.get(peer.name); if (l) l.dc = dc;
+  dc.binaryType = "arraybuffer";
+  dc.onopen = () => { print("data channel open → " + peer.name, "acc"); peer.online = true; peer.lastSeen = Date.now(); refreshHead(); updateLink(); };
+  dc.onclose = () => { print("data channel closed → " + peer.name, "warn"); peer.online = false; refreshHead(); updateLink(); };
+  dc.onmessage = async (e) => {
+    const env = new Uint8Array(e.data);
+    const sidHex = hex(env.slice(1, 9));
+    const p = [...S.peers.values()].find((x) => x.idHex === sidHex);
+    if (!p) { print("envelope from unpaired " + sidHex.slice(0, 8) + "… dropped", "err"); return; }
+    S.dcLog.push(Date.now() + " recv " + env.length + "B from " + p.name);
+    await routeEnvelope(p, env);
+  };
+  updateLink();
+}
+function newPC(peer, onDc) {
+  const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+  pc.onconnectionstatechange = updateLink;
+  pc.oniceconnectionstatechange = updateLink;
+  if (onDc) pc.ondatachannel = (e) => attachDC(peer, e.channel);
+  S.links.set(peer.name, { pc, dc: null, peer });
+  updateLink();
+  return pc;
+}
+const sdpB64 = (d) => btoa(JSON.stringify(d));
+const unB64 = (s) => JSON.parse(atob(s.replace(/\s/g, "")));
+
+cmd("rtcoffer", "usage: rtcoffer <peer> — create offer", async (a) => {
+  const p = needPeer(a[0]);
+  closeLinkSilent(p.name);
+  const pc = newPC(p, false);
+  const dc = pc.createDataChannel("gkk-envelopes", { ordered: true });
+  attachDC(p, dc);
+  await pc.setLocalDescription(await pc.createOffer());
+  await waitGathering(pc);
+  println("offer for " + p.name + " (paste into their rtcanswer):\n" + sdpB64(pc.localDescription));
+});
+cmd("rtcanswer", "usage: rtcanswer <peer> <offer-b64>", async (a) => {
+  const p = needPeer(a[0]); if (!a[1]) throw new Error("usage: rtcanswer <peer> <offer-b64>");
+  closeLinkSilent(p.name);
+  const pc = newPC(p, true);
+  await pc.setRemoteDescription(unB64(a[1]));
+  await pc.setLocalDescription(await pc.createAnswer());
+  await waitGathering(pc);
+  println("answer for " + p.name + ":\n" + sdpB64(pc.localDescription));
+});
+cmd("rtcaccept", "usage: rtcaccept <peer> <answer-b64>", async (a) => {
+  const p = needPeer(a[0]); const l = linkFor(p.name);
+  if (!a[1]) throw new Error("usage: rtcaccept <peer> <answer-b64>");
+  await l.pc.setRemoteDescription(unB64(a[1]));
+  println("answer applied — connecting to " + p.name + "…");
+});
+function closeLinkSilent(name) {
+  const l = S.links.get(name);
+  if (l) { try { l.dc && l.dc.close(); } catch (e) {} try { l.pc.close(); } catch (e) {} S.links.delete(name); }
+}
+cmd("hangup", "usage: hangup <peer>|all", async (a) => {
+  if (a[0] === "all") { [...S.links.keys()].forEach(closeLinkSilent); println("all links closed"); }
+  else { const p = needPeer(a[0]); closeLinkSilent(p.name); println("link closed: " + p.name); }
+  updateLink(); refreshHead();
+});
+cmd("rtclist", "list data links", async () => {
+  if (!S.links.size) { println("(none)"); return; }
+  println([...S.links.entries()].map(([k, l]) => k + ": pc=" + l.pc.connectionState + " ice=" + l.pc.iceConnectionState + " dc=" + (l.dc ? l.dc.readyState : "-")).join("\n"));
+});
+cmd("rtcstate", "usage: rtcstate <peer>", async (a) => {
+  const l = linkFor(needPeer(a[0]).name);
+  println("signaling=" + l.pc.signalingState + " ice=" + l.pc.iceConnectionState + " conn=" + l.pc.connectionState);
+});
+cmd("rtcstats", "usage: rtcstats <peer> — getStats()", async (a) => {
+  const l = linkFor(needPeer(a[0]).name);
+  const stats = await l.pc.getStats();
+  const out = [];
+  stats.forEach((r) => {
+    if (r.type === "candidate-pair" && r.state === "succeeded")
+      out.push("rtt=" + (r.currentRoundTripTime * 1000).toFixed(0) + "ms");
+    if (r.type === "data-channel") out.push("dc messagesSent=" + r.messagesSent + " recv=" + r.messagesReceived);
+  });
+  println(out.join("\n") || "(no stats yet)");
+});
+cmd("ice-restart", "usage: ice-restart <peer>", async (a) => {
+  const p = needPeer(a[0]); const l = linkFor(p.name);
+  const offer = await l.pc.createOffer({ iceRestart: true });
+  await l.pc.setLocalDescription(offer);
+  await waitGathering(l.pc);
+  println("restart offer for " + p.name + ":\n" + sdpB64(l.pc.localDescription) + "\n(peer: rtcaccept " + p.name + " <this>)");
+});
+cmd("candidates", "usage: candidates <peer> — local ICE candidates", async (a) => {
+  const l = linkFor(needPeer(a[0]).name);
+  const stats = await l.pc.getStats();
+  const out = [];
+  stats.forEach((r) => { if (r.type === "local-candidate") out.push(r.protocol + " " + r.address + ":" + r.port + " (" + r.candidateType + ")"); });
+  println(out.join("\n") || "(none gathered yet)");
+});
+cmd("myip", "public IP via STUN srflx candidate (no HTTP)", async () => {
+  const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+  pc.createDataChannel("x");
+  const ip = await new Promise((res) => {
+    const t = setTimeout(() => res(null), 12000);
+    pc.onicecandidate = (e) => {
+      if (!e.candidate) return;
+      const m = /(\d+\.\d+\.\d+\.\d+) \d+ typ srflx/.exec(e.candidate.candidate);
+      if (m) { clearTimeout(t); res(m[1]); }
+    };
+    pc.createOffer().then((o) => pc.setLocalDescription(o));
+  });
+  pc.close();
+  println(ip ? "public IP: " + ip : "no srflx candidate (no UDP path?)");
+});
+cmd("localips", "host ICE candidates (local IPs)", async () => {
+  const pc = new RTCPeerConnection();
+  pc.createDataChannel("x");
+  const ips = new Set();
+  await new Promise((res) => {
+    const t = setTimeout(res, 8000);
+    pc.onicecandidate = (e) => {
+      if (!e.candidate) { clearTimeout(t); res(); return; }
+      const m = /(\d+\.\d+\.\d+\.\d+) \d+ typ host/.exec(e.candidate.candidate);
+      if (m) ips.add(m[1]);
+    };
+    pc.createOffer().then((o) => pc.setLocalDescription(o));
+  });
+  pc.close();
+  println([...ips].join("\n") || "(none)");
+});
+cmd("dclog", "recent data-channel events", async () => {
+  println(S.dcLog.slice(-20).join("\n") || "(empty)");
+});
+cmd("sigset", "usage: sigset <wss-url> — optional signaling server", async (a) => {
+  if (!a[0]) throw new Error("usage: sigset <wss-url>");
+  S.wsUrl = a[0]; store.set("wsUrl", a[0]);
+  println("signaling server: " + a[0]);
+});
+cmd("sigsend", "usage: sigsend <room> <json> — send via signaling server", async (a, line) => {
+  if (!S.wsUrl) throw new Error("sigset first");
+  const room = a[0]; const payload = line.slice(line.indexOf(room) + room.length + 1);
+  await new Promise((res, rej) => {
+    const ws = new WebSocket(S.wsUrl);
+    ws.onopen = () => { ws.send(JSON.stringify({ room, payload })); setTimeout(() => { ws.close(); res(); }, 500); };
+    ws.onerror = () => rej(new Error("websocket failed"));
+  });
+  println("sent to room " + room);
+});
+cmd("ping", "usage: ping <peer> — RTT over data channel", async (a) => {
+  const p = needPeer(a[0]); const l = linkFor(p.name);
+  if (!l.dc || l.dc.readyState !== "open") throw new Error("data channel not open");
+  S.ackWait.set("ping-" + p.name, Date.now());
+  await sendKind(p, "ping", { t: Date.now() });
+  println("ping sent…");
+});
+cmd("rtt", "last measured round-trip ms", async () => {
+  println(S.rtt === null ? "(none yet — ping a peer)" : S.rtt + "ms");
+});
+
+/* ---------- D. messaging (14) ---------- */
+cmd("dispatch", "usage: dispatch <peer> <text>", async (a) => {
+  const p = needPeer(a[0]); const text = a.slice(1).join(" ");
+  if (!text) throw new Error("usage: dispatch <peer> <text>");
+  const l = linkFor(p.name);
+  if (!l.dc || l.dc.readyState !== "open") throw new Error("data channel not open — connect first");
+  const { tag } = await sendKind(p, "msg", { text });
+  S.ackWait.set(tag, Date.now());
+  inboxAdd({ name: "me→" + p.name }, "msg", text);
+  println("sent (" + tag + ") — awaiting ack…");
+});
+cmd("inbox", "show inbox (latest 20)", async () => {
+  const items = S.inbox.slice(-20);
+  if (!items.length) { println("(empty)"); return; }
+  println(items.map((m, i) => "[" + (S.inbox.length - items.length + i) + "] " +
+    new Date(m.ts).toLocaleTimeString() + " <" + m.from + "> [" + m.kind + "] " + m.text.slice(0, 120)).join("\n"));
+});
+cmd("inboxsearch", "usage: inboxsearch <query>", async (a) => {
+  const q = a.join(" ").toLowerCase(); if (!q) throw new Error("usage: inboxsearch <query>");
+  const hits = S.inbox.filter((m) => m.text.toLowerCase().includes(q) || m.from.toLowerCase().includes(q));
+  println(hits.length ? hits.map((m) => "<" + m.from + "> [" + m.kind + "] " + m.text.slice(0, 120)).join("\n") : "(no hits)");
+});
+cmd("inboxclear", "clear inbox", async () => { S.inbox = []; saveInbox(); println("inbox cleared"); });
+cmd("msginfo", "usage: msginfo <n> — inbox entry detail", async (a) => {
+  const m = S.inbox[parseInt(a[0], 10)];
+  if (!m) throw new Error("usage: msginfo <n>");
+  println(JSON.stringify(m, null, 2));
+});
+cmd("broadcast", "usage: broadcast <text> — all open data channels", async (a) => {
+  const text = a.join(" "); if (!text) throw new Error("usage: broadcast <text>");
+  let n = 0;
+  for (const [name, l] of S.links) {
+    if (!l.dc || l.dc.readyState !== "open") continue;
+    const p = needPeer(name);
+    await sendKind(p, "msg", { text, bcast: true }); n++;
+  }
+  println("broadcast to " + n + " peer(s)");
+});
+cmd("heartbeat", "usage: heartbeat on|off", async (a) => {
+  if (a[0] === "off") { clearInterval(S.hbTimer); S.hbTimer = null; println("heartbeats off"); return; }
+  if (a[0] !== "on") throw new Error("usage: heartbeat on|off");
+  if (S.hbTimer) { println("already on"); return; }
+  const beat = async () => {
+    let batt = null;
+    try { const b = await navigator.getBattery(); batt = Math.round(b.level * 100); } catch (e) {}
+    for (const [name, l] of S.links) {
+      if (l.dc && l.dc.readyState === "open") sendKind(needPeer(name), "hb", { batt }).catch(() => {});
+    }
+  };
+  S.hbTimer = setInterval(beat, 30000); beat();
+  println("heartbeats on (30s)");
+});
+cmd("presence", "peer presence", async () => {
+  if (!S.peers.size) { println("(no peers)"); return; }
+  println([...S.peers.values()].map((p) => p.name + ": " + (p.online ? "ONLINE" : "last seen " + (p.lastSeen ? new Date(p.lastSeen).toLocaleString() : "never"))).join("\n"));
+});
+cmd("watchdog", "usage: watchdog on|off — alert on missed heartbeats", async (a) => {
+  if (a[0] === "off") { clearInterval(S.wdTimer); S.wdTimer = null; println("watchdog off"); return; }
+  if (a[0] !== "on") throw new Error("usage: watchdog on|off");
+  if (S.wdTimer) { println("already on"); return; }
+  S.wdTimer = setInterval(() => {
+    for (const p of S.peers.values()) {
+      if (p.online && Date.now() - (p.lastSeen || 0) > 90000) {
+        p.online = false; refreshHead();
+        print('<span class="warn">WATCHDOG: ' + esc(p.name) + " missed heartbeat (90s)</span>");
+      }
+    }
+  }, 15000);
+  println("watchdog on");
+});
+cmd("sos", "usage: sos <peer> — encrypted GPS beacon", async (a) => {
+  const p = needPeer(a[0]); const l = linkFor(p.name);
+  if (!l.dc || l.dc.readyState !== "open") throw new Error("data channel not open");
+  const pos = await new Promise((res, rej) =>
+    navigator.geolocation.getCurrentPosition(res, rej, { timeout: 15000 }));
+  const text = "SOS " + pos.coords.latitude.toFixed(5) + "," + pos.coords.longitude.toFixed(5) +
+    " (±" + Math.round(pos.coords.accuracy) + "m)";
+  await sendKind(p, "sos", { text, lat: pos.coords.latitude, lon: pos.coords.longitude });
+  inboxAdd({ name: "me→" + p.name }, "sos", text);
+  println("SOS sent to " + p.name, "acc");
+});
+cmd("exportlog", "download inbox JSON", async () => {
+  const aEl = document.createElement("a");
+  aEl.href = URL.createObjectURL(new Blob([JSON.stringify(S.inbox, null, 2)], { type: "application/json" }));
+  aEl.download = "gkk-inbox.json"; aEl.click(); println("downloaded gkk-inbox.json");
+});
+function pickFile() {
+  return new Promise((res, rej) => {
+    const i = document.createElement("input"); i.type = "file";
+    i.onchange = () => i.files[0] ? res(i.files[0]) : rej(new Error("no file chosen"));
+    i.click();
+  });
+}
+cmd("sendfile", "usage: sendfile <peer> — pick + send encrypted file", async (a) => {
+  const p = needPeer(a[0]); const l = linkFor(p.name);
+  if (!l.dc || l.dc.readyState !== "open") throw new Error("data channel not open");
+  const file = await pickFile();
+  const buf = new Uint8Array(await file.arrayBuffer());
+  const sha = hex(await GkkCrypto.sha256(buf));
+  const fid = Math.random().toString(36).slice(2, 10);
+  const CH = 2048, total = Math.ceil(buf.length / CH);
+  await sendKind(p, "file-meta", { id: fid, name: file.name, size: buf.length, sha256: sha, chunks: total });
+  for (let i = 0; i < total; i++) {
+    await sendKind(p, "file-chunk", { id: fid, idx: i, data: b64e(buf.slice(i * CH, (i + 1) * CH)) });
+    if (i % 20 === 0) println("… " + i + "/" + total);
+  }
+  println("sent " + file.name + " (" + buf.length + "B) sha256=" + sha.slice(0, 16) + "…", "acc");
+});
+function fileMeta(peer, body) {
+  S.files.set(body.id, { name: body.name, size: body.size, sha256: body.sha256, total: body.chunks, chunks: new Map(), from: peer.name });
+  inboxAdd(peer, "file", "incoming: " + body.name + " (" + body.size + "B) id=" + body.id);
+  print("incoming file from " + peer.name + ": " + body.name + " — <span class=\"dim\">getfile " + body.id + "</span>", "acc");
+}
+async function fileChunk(peer, body) {
+  const f = S.files.get(body.id); if (!f) return;
+  f.chunks.set(body.idx, b64d(body.data));
+  if (f.chunks.size === f.total) {
+    const buf = new Uint8Array(f.size); let o = 0;
+    for (let i = 0; i < f.total; i++) { const c = f.chunks.get(i); buf.set(c, o); o += c.length; }
+    const sha = hex(await GkkCrypto.sha256(buf));
+    f.blob = new Blob([buf]); f.done = (sha === f.sha256);
+    print("file " + f.name + (f.done ? " received, hash VERIFIED" : " CORRUPTED (hash mismatch)"), f.done ? "acc" : "err");
+  }
+}
+cmd("recvlist", "list received files", async () => {
+  if (!S.files.size) { println("(none)"); return; }
+  println([...S.files.entries()].map(([id, f]) =>
+    id + "  " + f.name + "  " + f.size + "B  " + f.chunks.size + "/" + f.total + (f.done ? " VERIFIED" : "")).join("\n"));
+});
+cmd("getfile", "usage: getfile <id> — download received file", async (a) => {
+  const f = S.files.get(a[0]);
+  if (!f || !f.blob) throw new Error("no complete file with that id");
+  const el = document.createElement("a");
+  el.href = URL.createObjectURL(f.blob); el.download = f.name; el.click();
+  println("downloaded " + f.name);
+});
+</script>
+<script>
+"use strict";
+/* ---------- E. voice/video (12) ---------- */
+function mClose() {
+  try { S.mstream && S.mstream.getTracks().forEach((t) => t.stop()); } catch (e) {}
+  try { S.mpc && S.mpc.close(); } catch (e) {}
+  S.mpc = null; S.mstream = null; S.rstream = null; S.mpeer = null;
+  $("vids").innerHTML = ""; $("side-call").textContent = "idle";
+}
+async function mNew(peerName, withVideo) {
+  mClose();
+  const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+  S.mpc = pc; S.mpeer = peerName;
+  const micId = store.get("micId", null);
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: micId ? { deviceId: { exact: micId } } : true, video: withVideo ? { width: 640 } : false });
+  S.mstream = stream;
+  stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+  pc.ontrack = (e) => {
+    S.rstream = e.streams[0];
+    const v = document.createElement("video");
+    v.autoplay = true; v.playsInline = true; v.srcObject = e.streams[0];
+    $("vids").appendChild(v);
+    $("side-call").textContent = "in call: " + peerName;
+  };
+  pc.onconnectionstatechange = () => { if (pc.connectionState === "failed") print("call failed", "err"); };
+  return pc;
+}
+cmd("vcoffer", "usage: vcoffer <peer> [--video] — voice/video call offer", async (a) => {
+  const p = needPeer(a[0]);
+  const pc = await mNew(p.name, a.includes("--video"));
+  await pc.setLocalDescription(await pc.createOffer());
+  await waitGathering(pc);
+  println("call offer for " + p.name + ":\n" + sdpB64(pc.localDescription));
+  $("side-call").textContent = "dialing " + p.name + "…";
+});
+cmd("vcanswer", "usage: vcanswer <peer> <offer-b64> [--video]", async (a) => {
+  const p = needPeer(a[0]); if (!a[1]) throw new Error("usage: vcanswer <peer> <offer-b64> [--video]");
+  const pc = await mNew(p.name, a.includes("--video"));
+  await pc.setRemoteDescription(unB64(a[1]));
+  await pc.setLocalDescription(await pc.createAnswer());
+  await waitGathering(pc);
+  println("call answer for " + p.name + ":\n" + sdpB64(pc.localDescription));
+});
+cmd("vcaccept", "usage: vcaccept <answer-b64>", async (a) => {
+  if (!S.mpc) throw new Error("no outgoing call — vcoffer first");
+  if (!a[0]) throw new Error("usage: vcaccept <answer-b64>");
+  await S.mpc.setRemoteDescription(unB64(a[0]));
+  println("call connecting…");
+});
+cmd("vchangup", "hang up the call", async () => { mClose(); println("call ended"); });
+cmd("mute", "toggle microphone mute", async () => {
+  if (!S.mstream) throw new Error("no active call");
+  const t = S.mstream.getAudioTracks()[0]; if (!t) throw new Error("no mic track");
+  t.enabled = !t.enabled;
+  println(t.enabled ? "mic live" : "mic MUTED");
+});
+cmd("camoff", "toggle camera", async () => {
+  if (!S.mstream) throw new Error("no active call");
+  const t = S.mstream.getVideoTracks()[0]; if (!t) throw new Error("no camera track");
+  t.enabled = !t.enabled;
+  println(t.enabled ? "camera on" : "camera OFF");
+});
+cmd("screenshare", "share screen into the active call", async () => {
+  if (!S.mpc) throw new Error("no active call — vcoffer/vcanswer first");
+  const ds = await navigator.mediaDevices.getDisplayMedia({ video: true });
+  const track = ds.getVideoTracks()[0];
+  const sender = S.mpc.getSenders().find((x) => x.track && x.track.kind === "video");
+  if (sender) await sender.replaceTrack(track);
+  else S.mpc.addTrack(track, ds);
+  track.onended = () => println("screen share stopped", "dim");
+  println("screen sharing", "acc");
+});
+cmd("callstats", "live call stats (bitrate/jitter/RTT)", async () => {
+  if (!S.mpc) throw new Error("no active call");
+  const stats = await S.mpc.getStats();
+  const out = [];
+  stats.forEach((r) => {
+    if (r.type === "inbound-rtp" && r.kind === "audio")
+      out.push("in: jitter=" + (r.jitter * 1000).toFixed(1) + "ms loss=" + (r.packetsLost || 0));
+    if (r.type === "outbound-rtp" && r.kind === "audio")
+      out.push("out: bitrate=" + ((r.bytesSent || 0) * 8 / 1000).toFixed(0) + "kbps");
+    if (r.type === "candidate-pair" && r.state === "succeeded")
+      out.push("rtt=" + (r.currentRoundTripTime * 1000).toFixed(0) + "ms");
+  });
+  println(out.join("\n") || "(no stats yet)");
+});
+cmd("recstart", "record the remote call audio/video", async () => {
+  if (!S.rstream) throw new Error("no remote stream yet");
+  S.recChunks = [];
+  S.rec = new MediaRecorder(S.rstream);
+  S.rec.ondataavailable = (e) => { if (e.data.size) S.recChunks.push(e.data); };
+  S.rec.start();
+  println("recording… (consent of all parties is your responsibility)");
+});
+cmd("recsave", "stop + download the recording", async () => {
+  if (!S.rec) throw new Error("not recording — recstart first");
+  await new Promise((res) => { S.rec.onstop = res; S.rec.stop(); });
+  const blob = new Blob(S.recChunks, { type: S.rec.mimeType || "video/webm" });
+  const aEl = document.createElement("a");
+  aEl.href = URL.createObjectURL(blob); aEl.download = "gkk-call.webm"; aEl.click();
+  S.rec = null; println("saved gkk-call.webm (" + blob.size + "B)");
+});
+cmd("devices", "list cameras/microphones", async () => {
+  const devs = await navigator.mediaDevices.enumerateDevices();
+  println(devs.map((d) => d.kind + ": " + (d.label || "(label hidden until permission granted)") + " [" + d.deviceId.slice(0, 8) + "…]").join("\n") || "(none)");
+});
+cmd("setmic", "usage: setmic <deviceId> — pick microphone for next call", async (a) => {
+  if (!a[0]) throw new Error("usage: setmic <deviceId> (see 'devices')");
+  store.set("micId", a[0]); println("mic set for next call");
+});
+</script>
+<script>
+"use strict";
+/* ---------- F. ops tools (26) — real browser APIs ---------- */
+async function fetchTimed(url, opts) {
+  const t0 = performance.now();
+  const r = await fetch(url, opts);
+  const ms = performance.now() - t0;
+  return { r, ms };
+}
+cmd("httphead", "usage: httphead <url>", async (a) => {
+  if (!a[0]) throw new Error("usage: httphead <url>");
+  try {
+    const { r, ms } = await fetchTimed(a[0], { method: "HEAD" });
+    const h = []; r.headers.forEach((v, k) => h.push(k + ": " + v));
+    println("HTTP " + r.status + " (" + ms.toFixed(0) + "ms)\n" + h.join("\n"));
+  } catch (e) { throw new Error("blocked by CORS or unreachable: " + e.message); }
+});
+cmd("httpget", "usage: httpget <url>", async (a) => {
+  if (!a[0]) throw new Error("usage: httpget <url>");
+  try {
+    const { r, ms } = await fetchTimed(a[0]);
+    const t = (await r.text()).slice(0, 2000);
+    println("HTTP " + r.status + " (" + ms.toFixed(0) + "ms)\n" + t);
+  } catch (e) { throw new Error("blocked by CORS or unreachable: " + e.message); }
+});
+cmd("doh", "usage: doh <name> [type]", async (a) => {
+  if (!a[0]) throw new Error("usage: doh <name> [type]");
+  const r = await fetch("https://dns.google/resolve?name=" + encodeURIComponent(a[0]) + "&type=" + encodeURIComponent(a[1] || "A"));
+  const j = await r.json();
+  if (j.Status !== 0) throw new Error("DNS status " + j.Status);
+  println((j.Answer || []).map((x) => x.name + "  " + x.type + "  " + x.data).join("\n") || "(no answers)");
+});
+cmd("rdap", "usage: rdap <domain> — RDAP (modern whois-over-HTTPS)", async (a) => {
+  if (!a[0]) throw new Error("usage: rdap <domain>");
+  const r = await fetch("https://rdap.org/domain/" + encodeURIComponent(a[0]));
+  if (!r.ok) throw new Error("RDAP lookup failed: HTTP " + r.status);
+  const j = await r.json();
+  const ev = (j.events || []).map((e) => e.eventAction + "=" + e.eventDate).join(", ");
+  println("handle: " + (j.handle || "?") + "\nstatus: " + (j.status || []).join(",") +
+    "\nregistrar: " + (((j.entities || [])[0] || {}).vcardArray || [])[1] + "\nevents: " + ev);
+});
+cmd("speedtest", "download speed test (10MB via Cloudflare)", async () => {
+  const t0 = performance.now();
+  const r = await fetch("https://speed.cloudflare.com/__down?bytes=10000000");
+  const buf = await r.arrayBuffer();
+  const sec = (performance.now() - t0) / 1000;
+  println((buf.byteLength / 1e6).toFixed(1) + " MB in " + sec.toFixed(1) + "s = " + (buf.byteLength * 8 / sec / 1e6).toFixed(1) + " Mbps");
+});
+cmd("fetchping", "usage: fetchping <url> — timed fetch", async (a) => {
+  if (!a[0]) throw new Error("usage: fetchping <url>");
+  try { const { r, ms } = await fetchTimed(a[0], { method: "HEAD", cache: "no-store" }); println("HTTP " + r.status + " in " + ms.toFixed(0) + "ms"); }
+  catch (e) { throw new Error("unreachable/CORS: " + e.message); }
+});
+cmd("battery", "battery status (Chromium)", async () => {
+  try {
+    const b = await navigator.getBattery();
+    println("level: " + Math.round(b.level * 100) + "%  charging: " + b.charging +
+      "\ncharge time: " + b.chargingTime + "s  discharge: " + b.dischargingTime + "s");
+  } catch (e) { throw new Error("Battery API not available here"); }
+});
+cmd("deviceinfo", "browser/device facts", async () => {
+  println("ua: " + navigator.userAgent + "\nplatform: " + navigator.platform +
+    "\ncores: " + (navigator.hardwareConcurrency || "?") + "  device-mem: " + (navigator.deviceMemory || "?") + "GB" +
+    "\nlang: " + navigator.language + "  online: " + navigator.online +
+    "\ncookies: " + navigator.cookieEnabled + "  webdriver: " + navigator.webdriver);
+});
+cmd("displayinfo", "screen facts", async () => {
+  println(screen.width + "x" + screen.height + "  avail " + screen.availWidth + "x" + screen.availHeight +
+    "\ndpr: " + devicePixelRatio + "  depth: " + screen.colorDepth + "bit" +
+    "\norientation: " + (screen.orientation ? screen.orientation.type : "?"));
+});
+cmd("netinfo", "NetworkInformation API", async () => {
+  const c = navigator.connection;
+  if (!c) throw new Error("NetworkInformation API not available");
+  println("type: " + c.effectiveType + "  downlink: " + c.downlink + "Mbps  rtt: " + c.rtt + "ms  saveData: " + c.saveData);
+});
+cmd("storage", "storage estimate", async () => {
+  const e = await navigator.storage.estimate();
+  println("usage: " + (e.usage / 1048576).toFixed(1) + " MB / quota: " + (e.quota / 1073741824).toFixed(1) + " GB");
+});
+cmd("geolocate", "GPS fix", async () => {
+  const p = await new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, { timeout: 15000 }));
+  println(p.coords.latitude.toFixed(6) + "," + p.coords.longitude.toFixed(6) + "  ±" + Math.round(p.coords.accuracy) + "m");
+});
+cmd("sensors", "motion sensors (where supported)", async () => {
+  const out = [];
+  try {
+    const acc = new Accelerometer({ frequency: 1 });
+    const v = await new Promise((res, rej) => { acc.onreading = () => res([acc.x, acc.y, acc.z]); acc.onerror = rej; acc.start(); setTimeout(() => rej(new Error("timeout")), 5000); });
+    acc.stop(); out.push("accelerometer: " + v.map((x) => x.toFixed(2)).join(", "));
+  } catch (e) { out.push("accelerometer: unavailable (" + e.message + ")"); }
+  try {
+    const g = new Gyroscope({ frequency: 1 });
+    const v = await new Promise((res, rej) => { g.onreading = () => res([g.x, g.y, g.z]); g.onerror = rej; g.start(); setTimeout(() => rej(new Error("timeout")), 5000); });
+    g.stop(); out.push("gyroscope: " + v.map((x) => x.toFixed(2)).join(", "));
+  } catch (e) { out.push("gyroscope: unavailable (" + e.message + ")"); }
+  println(out.join("\n"));
+});
+cmd("audioinfo", "audio devices", async () => {
+  const devs = await navigator.mediaDevices.enumerateDevices();
+  println(devs.filter((d) => d.kind.startsWith("audio")).map((d) => d.kind + ": " + (d.label || "(needs mic permission)") + " [" + d.deviceId.slice(0, 8) + "…]").join("\n") || "(none)");
+});
+cmd("clipread", "read clipboard", async () => {
+  try { println(await navigator.clipboard.readText() || "(empty)"); }
+  catch (e) { throw new Error("clipboard denied — click the page first, then retry"); }
+});
+cmd("clipwrite", "usage: clipwrite <text>", async (a) => {
+  const t = a.join(" "); if (!t) throw new Error("usage: clipwrite <text>");
+  try { await navigator.clipboard.writeText(t); println("copied (" + t.length + " chars)"); }
+  catch (e) { throw new Error("clipboard denied — click the page first, then retry"); }
+});
+cmd("vibrate", "usage: vibrate [ms] — haptics (mobile)", async (a) => {
+  const okm = navigator.vibrate(parseInt(a[0] || "200", 10) || 200);
+  println(okm ? "vibrated" : "vibration not supported here");
+});
+let _wl = null;
+cmd("wakelock", "usage: wakelock on|off — keep screen awake", async (a) => {
+  if (a[0] === "off") { try { _wl && await _wl.release(); } catch (e) {} _wl = null; println("wake lock released"); return; }
+  if (a[0] !== "on") throw new Error("usage: wakelock on|off");
+  try { _wl = await navigator.wakeLock.request("screen"); println("wake lock held"); }
+  catch (e) { throw new Error("wake lock denied: " + e.message); }
+});
+cmd("notify", "usage: notify <text> — desktop notification", async (a) => {
+  const t = a.join(" "); if (!t) throw new Error("usage: notify <text>");
+  const perm = await Notification.requestPermission();
+  if (perm !== "granted") throw new Error("notification permission denied");
+  new Notification("GKK", { body: t });
+  println("notified");
+});
+cmd("time", "clock facts", async () => {
+  const n = Date.now();
+  println("epoch ms: " + n + "\nutc: " + new Date(n).toISOString() + "\ntz: " + Intl.DateTimeFormat().resolvedOptions().timeZone + "\nperf: " + Math.round(performance.now()) + "ms");
+});
+cmd("ntpdate", "clock offset via HTTP Date header", async () => {
+  const t0 = Date.now();
+  const r = await fetch("https://www.google.com/generate_204", { cache: "no-store" });
+  const dh = r.headers.get("date");
+  if (!dh) throw new Error("no Date header returned");
+  const off = Date.parse(dh) - (t0 + (Date.now() - t0) / 2);
+  println("offset: " + off + "ms (clock " + (off >= 0 ? "behind" : "ahead") + " by " + Math.abs(off) + "ms)");
+});
+cmd("uuid", "random UUID v4", async () => { println(crypto.randomUUID()); });
+cmd("b64e", "usage: b64e <text>", async (a) => {
+  const t = a.join(" "); if (!t) throw new Error("usage: b64e <text>");
+  println(btoa(String.fromCharCode(...utf8(t))));
+});
+cmd("b64d", "usage: b64d <base64>", async (a) => {
+  if (!a[0]) throw new Error("usage: b64d <base64>");
+  try { println(new TextDecoder().decode(b64d(a[0]))); }
+  catch (e) { throw new Error("invalid base64"); }
+});
+cmd("hexdump", "usage: hexdump <text>", async (a) => {
+  const t = a.join(" "); if (!t) throw new Error("usage: hexdump <text>");
+  const b = utf8(t); const out = [];
+  for (let o = 0; o < b.length; o += 16) {
+    const row = b.slice(o, o + 16);
+    out.push(o.toString(16).padStart(4, "0") + "  " +
+      [...row].map((x) => x.toString(16).padStart(2, "0")).join(" ").padEnd(48) +
+      " |" + [...row].map((x) => (x >= 32 && x < 127 ? String.fromCharCode(x) : ".")).join("") + "|");
+  }
+  println(out.join("\n"));
+});
+cmd("aesbench", "AES-256-GCM throughput (WebCrypto)", async () => {
+  const MB = 8;
+  const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt"]);
+  const data = crypto.getRandomValues(new Uint8Array(MB * 1048576));
+  const t0 = performance.now();
+  for (let o = 0; o < data.length; o += 1048576) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, data.slice(o, o + 1048576));
+  }
+  const sec = (performance.now() - t0) / 1000;
+  println(MB + " MB in " + sec.toFixed(2) + "s = " + (MB / sec).toFixed(0) + " MB/s (AES-256-GCM)");
+});
+</script>
+<script>
+"use strict";
+/* ---------- G. monitors + app (8) ---------- */
+S.monSet = new Set();
+const MONS = {
+  battery: async () => { try { const b = await navigator.getBattery(); return "batt " + Math.round(b.level * 100) + "%" + (b.charging ? "+" : ""); } catch (e) { return "batt n/a"; } },
+  net: async () => "net " + (navigator.onLine ? "online" : "OFFLINE") + " " + ((navigator.connection || {}).effectiveType || ""),
+  rtc: async () => { const n = [...S.links.values()].filter((l) => l.dc && l.dc.readyState === "open").length; return "rtc links=" + n + (S.rtt !== null ? " rtt=" + S.rtt + "ms" : ""); },
+  peers: async () => { const o = [...S.peers.values()].filter((p) => p.online).length; return "peers " + o + "/" + S.peers.size + " online"; },
+  clock: async () => "clock " + new Date().toLocaleTimeString(),
+  perf: async () => (performance.memory ? "jsheap " + (performance.memory.usedJSHeapSize / 1048576).toFixed(0) + "MB" : "perf n/a"),
+};
+async function monTick() {
+  if (!S.monSet.size) { $("mon").style.display = "none"; return; }
+  $("mon").style.display = "block";
+  const parts = [];
+  for (const m of S.monSet) { try { parts.push(await MONS[m]()); } catch (e) { parts.push(m + " err"); } }
+  $("mon").innerHTML = '<span class="dim">MON</span> ' + parts.map(esc).join(" · ");
+}
+cmd("mon", "usage: mon <battery|net|rtc|peers|clock|perf|all> on|off", async (a) => {
+  const name = a[0], on = a[1] === "on";
+  const names = name === "all" ? Object.keys(MONS) : [name];
+  if (!name || !a[1] || (name !== "all" && !MONS[name])) throw new Error("usage: mon <battery|net|rtc|peers|clock|perf|all> on|off");
+  names.forEach((n) => on ? S.monSet.add(n) : S.monSet.delete(n));
+  if (S.monSet.size && !S.monTimer) S.monTimer = setInterval(monTick, 2000);
+  if (!S.monSet.size && S.monTimer) { clearInterval(S.monTimer); S.monTimer = null; }
+  monTick();
+  println("monitors: " + ([...S.monSet].join(", ") || "(none)"));
+});
+cmd("monlist", "available monitors", async () => { println(Object.keys(MONS).join(" ")); });
+cmd("help", "list all commands", async () => {
+  const names = Object.keys(CMDS).sort();
+  println(names.map((n) => n.padEnd(14) + CMDS[n].help).join("\n") + "\n\n" + names.length + " commands. Envelope v1 interop with the Android app is byte-exact (proven: web/interop-test).");
+});
+cmd("clear", "clear terminal", async () => { term.innerHTML = ""; });
+cmd("theme", "toggle dark/light", async () => {
+  S.theme = S.theme === "dark" ? "light" : "dark";
+  store.set("theme", S.theme);
+  document.body.classList.toggle("light", S.theme === "light");
+  println("theme: " + S.theme);
+});
+cmd("alias", "usage: alias <name> <command> | alias (list)", async (a) => {
+  if (!a[0]) { const ks = Object.keys(S.aliases); println(ks.length ? ks.map((k) => k + " -> " + S.aliases[k]).join("\n") : "(none)"); return; }
+  if (a.length < 2) throw new Error("usage: alias <name> <command>");
+  S.aliases[a[0].toLowerCase()] = a[1].toLowerCase();
+  store.set("aliases", S.aliases);
+  println("alias " + a[0] + " -> " + a[1]);
+});
+cmd("exportcfg", "download full config JSON", async () => {
+  const cfg = { peers: store.get("peers", []), inbox: S.inbox, aliases: S.aliases, theme: S.theme, wsUrl: S.wsUrl };
+  const aEl = document.createElement("a");
+  aEl.href = URL.createObjectURL(new Blob([JSON.stringify(cfg, null, 2)], { type: "application/json" }));
+  aEl.download = "gkk-config.json"; aEl.click();
+  println("downloaded gkk-config.json (note: private key stays in IndexedDB, never exported)");
+});
+cmd("reset", "usage: reset yes — wipe everything", async (a) => {
+  if (a[0] !== "yes") { println("type 'reset yes' to wipe identity, peers, inbox and settings", "warn"); return; }
+  localStorage.clear();
+  indexedDB.deleteDatabase("gkk");
+  location.reload();
+});
+
+/* ---------- init ---------- */
+(async function init() {
+  document.body.classList.toggle("light", S.theme === "light");
+  try {
+    await ensureIdentity(true);
+    await loadPeers();
+    S.inbox = store.get("inbox", []);
+    S.wsUrl = store.get("wsUrl", null);
+    refreshHead();
+    print('<span class="acc">GKK/Web</span> <span class="dim">— encrypted dispatch console (Envelope v1, byte-exact with Android)</span>');
+    println("identity " + S.idHex.slice(0, 16) + "…  words: " + S.words);
+    println("100 features — type 'help'. Data links: rtcoffer <peer> / rtcanswer / rtcaccept. Calls: vcoffer <peer> [--video].");
+  } catch (e) {
+    print("init failed: " + e.message + " (private mode? IndexedDB is required)", "err");
+  }
+})();
+</script>
+</body>
+</html>
