@@ -3,45 +3,48 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>GKK Web — Encrypted Dispatch Console</title>
+<title>GKK Operators Console</title>
 <style>
-:root { --bg:#0a0e0a; --fg:#c8f0c8; --dim:#6a8a6a; --acc:#4ade80; --warn:#fbbf24; --err:#f87171; }
-body.light { --bg:#f4f4f0; --fg:#1a2a1a; --dim:#6a7a6a; --acc:#166534; --warn:#b45309; --err:#b91c1c; }
+:root { --bg:#0b0d10; --bg2:#12151a; --fg:#e9ebee; --dim:#98a0aa; --line:#22262d; --acc:#c9a227; --acc2:#e3c558; --warn:#c98a1b; --err:#c0563f; --ok:#3d8a5f; }
+body.light { --bg:#ffffff; --bg2:#f5f6f8; --fg:#17191d; --dim:#5d626b; --line:#e3e5e9; --acc:#97791a; --acc2:#7a6114; --warn:#a86a12; --err:#a83c2a; --ok:#2c6e49; }
 * { box-sizing:border-box; }
-body { margin:0; background:var(--bg); color:var(--fg); font-family:ui-monospace,Menlo,Consolas,monospace; font-size:14px; }
-#head { padding:10px 14px; border-bottom:1px solid var(--dim); display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
-#head b { color:var(--acc); }
-#head .pill { border:1px solid var(--dim); border-radius:10px; padding:2px 8px; font-size:12px; }
-#wrap { display:flex; height:calc(100vh - 49px); }
-#term { flex:1; overflow-y:auto; padding:12px 14px; white-space:pre-wrap; word-break:break-word; }
-#side { width:260px; border-left:1px solid var(--dim); padding:10px; overflow-y:auto; font-size:12px; }
-#side h4 { margin:8px 0 4px; color:var(--acc); font-size:12px; }
-#inrow { display:flex; border-top:1px solid var(--dim); }
-#ps1 { padding:12px 4px 12px 14px; color:var(--acc); }
-#cmd { flex:1; background:transparent; border:0; color:var(--fg); font:inherit; padding:12px 14px 12px 0; outline:none; }
+body { margin:0; background:var(--bg); color:var(--fg); font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Inter,Roboto,sans-serif; font-size:14px; -webkit-font-smoothing:antialiased; }
+.mono { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+#head { padding:10px 16px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; flex-wrap:wrap; background:var(--bg2); }
+#head b { color:var(--fg); font-weight:600; letter-spacing:.02em; }
+#head .pill { border:1px solid var(--line); background:var(--bg); border-radius:20px; padding:3px 10px; font-size:12px; color:var(--dim); }
+#wrap { display:flex; height:calc(100vh - 53px); }
+#term { flex:1; overflow-y:auto; padding:14px 16px; white-space:pre-wrap; word-break:break-word; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13px; line-height:1.55; }
+#side { width:260px; border-left:1px solid var(--line); background:var(--bg2); padding:12px; overflow-y:auto; font-size:12px; }
+#side h4 { margin:10px 0 4px; color:var(--dim); font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.06em; }
+#inrow { display:flex; border-top:1px solid var(--line); background:var(--bg2); }
+#ps1 { padding:12px 4px 12px 16px; color:var(--acc); font-family:ui-monospace,Menlo,Consolas,monospace; }
+#cmd { flex:1; background:transparent; border:0; color:var(--fg); font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13px; padding:12px 16px 12px 0; outline:none; }
 .dim { color:var(--dim); } .acc { color:var(--acc); } .warn { color:var(--warn); } .err { color:var(--err); }
-#mon { border-top:1px dashed var(--dim); margin-top:8px; padding-top:8px; display:none; }
-video { max-width:100%; border:1px solid var(--dim); }
-.vbtn { background:transparent; border:1px solid var(--dim); color:var(--dim); border-radius:10px; padding:2px 10px; font:inherit; font-size:12px; cursor:pointer; }
-.vbtn.on { color:var(--acc); border-color:var(--acc); }
-#dash { display:none; overflow-y:auto; padding:14px; }
-#dashsearch { width:100%; background:transparent; border:1px solid var(--dim); color:var(--fg); font:inherit; padding:10px 12px; border-radius:8px; margin-bottom:6px; outline:none; }
-#dashresult { display:none; border:1px solid var(--acc); border-radius:8px; padding:10px 12px; margin-bottom:12px; white-space:pre-wrap; word-break:break-word; }
-#dashresult button { background:transparent; border:1px solid var(--dim); color:var(--fg); border-radius:6px; font:inherit; font-size:12px; cursor:pointer; margin-left:6px; }
-.dash-cat { color:var(--acc); font-size:13px; margin:16px 0 8px; }
-.dash-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:8px; }
-.card { border:1px solid var(--dim); border-radius:10px; padding:10px 12px; cursor:pointer; }
-.card:hover { border-color:var(--acc); }
-.card .ci { font-size:20px; }
-.card .cn { color:var(--acc); font-size:13px; margin:4px 0 2px; }
-.card .cd { color:var(--dim); font-size:11px; line-height:1.35; }
-.card .cc { color:var(--dim); font-size:10px; opacity:0.7; }
+#mon { border-top:1px solid var(--line); margin-top:8px; padding-top:8px; display:none; }
+video { max-width:100%; border:1px solid var(--line); border-radius:8px; }
+.vbtn { background:transparent; border:1px solid var(--line); color:var(--dim); border-radius:20px; padding:4px 14px; font:inherit; font-size:12px; font-weight:500; cursor:pointer; }
+.vbtn.on { color:#0b0d10; background:var(--acc); border-color:var(--acc); }
+body.light .vbtn.on { color:#fff; }
+#dash { display:none; overflow-y:auto; padding:16px; max-width:1200px; margin:0 auto; }
+#dashsearch { width:100%; background:var(--bg2); border:1px solid var(--line); color:var(--fg); font:inherit; padding:11px 14px; border-radius:10px; margin-bottom:8px; outline:none; }
+#dashsearch:focus { border-color:var(--acc); }
+#dashresult { display:none; border:1px solid var(--line); border-left:3px solid var(--acc); background:var(--bg2); border-radius:10px; padding:12px 14px; margin-bottom:12px; white-space:pre-wrap; word-break:break-word; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:13px; }
+#dashresult button { background:transparent; border:1px solid var(--line); color:var(--fg); border-radius:8px; font:inherit; font-size:12px; cursor:pointer; margin-left:6px; padding:4px 10px; }
+.dash-cat { color:var(--fg); font-size:13px; font-weight:600; margin:20px 0 10px; letter-spacing:.01em; }
+.dash-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:10px; }
+.card { background:var(--bg2); border:1px solid var(--line); border-radius:12px; padding:14px; cursor:pointer; transition:border-color .15s, transform .15s; }
+.card:hover { border-color:var(--acc); transform:translateY(-1px); }
+.card .ci { font-size:22px; }
+.card .cn { color:var(--fg); font-size:13px; font-weight:600; margin:6px 0 3px; }
+.card .cd { color:var(--dim); font-size:12px; line-height:1.45; }
+.card .cc { color:var(--dim); font-size:10px; opacity:.65; margin-top:6px; font-family:ui-monospace,Menlo,Consolas,monospace; }
 @media (max-width:700px){ #side{ display:none; } }
 </style>
 </head>
 <body>
 <div id="head">
-  <b>GKK/WEB</b><span class="dim">encrypted dispatch console</span>
+  <b>GKK</b><span class="dim">Operators Console</span>
   <span><button class="vbtn on" id="btn-dash">Dashboard</button> <button class="vbtn" id="btn-term">Terminal</button></span>
   <span class="pill" id="h-id">no identity</span>
   <span class="pill" id="h-rtc">rtc: down</span>
@@ -56,7 +59,7 @@ video { max-width:100%; border:1px solid var(--dim); }
     </div>
     <div id="term" style="display:none"></div>
     <div id="mon"></div>
-    <div id="inrow"><span id="ps1">gkk&gt;</span><input id="cmd" autocomplete="off" spellcheck="false" placeholder="type 'help'"></div>
+    <div id="inrow"><span id="ps1">›</span><input id="cmd" autocomplete="off" spellcheck="false" placeholder="Type a command, or 'help'"></div>
   </div>
   <div id="side">
     <h4>PEERS</h4><div id="side-peers" class="dim">none</div>
@@ -742,7 +745,7 @@ const PRIMARY_ALIAS = {
 
 const hist = []; let hi = 0;
 async function runLine(line) {
-  print('<span class="acc">gkk&gt;</span> ' + esc(line));
+  print('<span class="acc">›</span> ' + esc(line));
   const parts = line.trim().split(/\s+/).filter(Boolean);
   if (!parts.length) return;
   const raw = parts[0].toLowerCase();
@@ -1896,7 +1899,7 @@ cmd("reset", "usage: reset yes — wipe everything", async (a) => {
     S.inbox = store.get("inbox", []);
     S.wsUrl = store.get("wsUrl", null);
     refreshHead();
-    print('<span class="acc">GKK/Web</span> <span class="dim">— encrypted dispatch console (Envelope v1, byte-exact with Android)</span>');
+    print('<b>GKK Operators Console</b>');
     println("identity " + S.idHex.slice(0, 16) + "…  words: " + S.words);
     println(Object.keys(CMDS).length + " features — type 'help'. Data links: rtcoffer <peer> / rtcanswer / rtcaccept. Calls: vcoffer <peer> [--video].");
   } catch (e) {
