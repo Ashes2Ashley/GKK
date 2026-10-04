@@ -204,14 +204,536 @@ function dcSendBytes(env) { // legacy: sends on the first open link
 /* ---------- command framework ---------- */
 const CMDS = {};
 function cmd(name, help, fn) { CMDS[name] = { help, fn }; }
+/* ---------- built-in plain-English aliases (every command gets simple names) ---------- */
+/* user aliases (alias command) override these. 'help' shows them. */
+const BUILTIN_ALIASES = {
+"add-friend": "trust",
+"addons": "plugins",
+"alert-me": "notify",
+"am-i-online": "onoffinfo",
+"announce": "broadcast",
+"answer-call": "vcanswer",
+"answer-link": "rtcanswer",
+"ask-ball": "eightball",
+"atomic-clock": "ntpdate",
+"auth-code": "totp",
+"authenticator": "totp",
+"backup-everything": "exportcfg",
+"backup-friends": "exportpeers",
+"backup-messages": "exportlog",
+"battery-level": "battery",
+"beat-keeper": "metronome",
+"buzz": "vibrate",
+"calculator": "calc",
+"call": "vcoffer",
+"call-quality": "callstats",
+"camera-info": "exifread",
+"camera-toggle": "camoff",
+"can-sites-read": "corscheck",
+"card-maker": "macvendor",
+"change-case": "caseconv",
+"char-codes": "unicode",
+"check-cert": "certinfo",
+"check-device-card": "attest-verify",
+"check-key": "importkey",
+"check-signature": "everify",
+"choose-for-me": "pickone",
+"choose-mic": "setmic",
+"clear-messages": "inboxclear",
+"clock": "time",
+"cloudflare-dns": "dohcf",
+"cls": "clear",
+"coin": "coinflip",
+"commands": "help",
+"compare-text": "textdiff",
+"complete-link": "rtcaccept",
+"connect": "rtcoffer",
+"connection-type": "netinfo",
+"convert-color": "colorconv",
+"convert-number": "baseconv",
+"convert-photo": "imgconvert",
+"convert-px": "csspx",
+"convert-units": "unitconv",
+"copy": "clipwrite",
+"copy-text": "clipwrite",
+"cors-test": "corscheck",
+"count-words": "wordcount",
+"crypto-speed": "aesbench",
+"csv-to-json": "csv2json",
+"custom-request": "reqbuilder",
+"dark-mode": "theme",
+"decode-token": "jwtdecode",
+"decode-url": "urldecode",
+"decode64": "b64d",
+"decrypt-test": "openenv",
+"decrypt-text": "unlock",
+"device-card": "attest",
+"dice": "diceroll",
+"dictate": "stt",
+"diff": "textdiff",
+"disconnect": "hangup",
+"dm": "dispatch",
+"dns-lookup": "doh",
+"domain-info": "rdap",
+"download-file": "getfile",
+"download-key": "exportkey",
+"download-page": "httpget",
+"emergency-beacon": "sos",
+"encode-url": "urlencode",
+"encode64": "b64e",
+"encrypt-test": "seal",
+"encrypt-text": "lock",
+"end-call": "vchangup",
+"end-link": "hangup",
+"escape-html": "htmlesc",
+"explain-cron": "crondesc",
+"factory-reset": "reset",
+"fetch-site": "httpget",
+"file-to-text": "fileb64e",
+"file-types": "mimetypes",
+"filler-text": "lorem",
+"find-message": "inboxsearch",
+"fingerprint": "sha256",
+"finish-link": "rtcaccept",
+"first-words": "excerpt",
+"fix-link": "ice-restart",
+"flip-coin": "coinflip",
+"focus-timer": "pomodoro",
+"follow-link": "redirtrace",
+"fonts": "fontlist",
+"free-space": "storage",
+"fresh-start": "newid",
+"friend-info": "peerinfo",
+"friend-level": "trustlevel",
+"friends": "peers",
+"from-base64": "b64d",
+"get-file": "getfile",
+"gps": "geolocate",
+"grab-color": "colorpick",
+"grade-site": "secheaders",
+"hang-up": "vchangup",
+"haptic": "vibrate",
+"heartbeat-toggle": "heartbeat",
+"helper-server": "sigset",
+"history-count": "histlen",
+"how-loud": "noisemeter",
+"how-strong": "entropy",
+"internet-speed": "speedtest",
+"ip-math": "subnet",
+"is-port-open": "porthint",
+"is-readable": "contrast",
+"is-touch": "touchinfo",
+"join-call": "vcaccept",
+"joke": "dadjoke",
+"json-to-csv": "json2csv",
+"keep-awake": "wakelock",
+"key-wrap": "wrapdemo",
+"last-ping": "rtt",
+"latency": "rtt",
+"light-mode": "theme",
+"link-log": "dclog",
+"link-stats": "rtcstats",
+"link-status": "rtcstate",
+"links": "rtclist",
+"list-devices": "devices",
+"list-friends": "peers",
+"local-addresses": "localips",
+"lock-text": "lock",
+"login-code": "totp",
+"magic-8": "eightball",
+"many-qrs": "qrbatch",
+"message-detail": "msginfo",
+"messages": "inbox",
+"mics-cameras": "devices",
+"monitor": "mon",
+"monitors": "monlist",
+"morse-code": "morse",
+"motion-sensor": "sensors",
+"mute-mic": "mute",
+"my-addresses": "candidates",
+"my-device": "attest",
+"my-fingerprint": "myid",
+"my-friends": "peers",
+"my-identity": "myid",
+"my-internet-address": "myip",
+"my-links": "rtclist",
+"my-location": "geolocate",
+"my-messages": "inbox",
+"my-qr": "qrgen",
+"my-setup": "config",
+"network-math": "subnet",
+"network-type": "netinfo",
+"new-id": "uuid7",
+"new-identity": "newid",
+"new-password": "passphrase",
+"new-uuid": "uuid",
+"no-sleep": "wakelock",
+"notebook": "notes",
+"notepad": "notes",
+"notification": "notify",
+"now": "time",
+"online-now": "presence",
+"open-message": "openenv",
+"open-pdf": "pdfview",
+"pair": "trust",
+"pair-qr": "qrgen",
+"panic": "sos",
+"password-strength": "entropy",
+"paste": "clipread",
+"peek-site": "httphead",
+"peek-token": "jwtdecode",
+"phone-info": "deviceinfo",
+"photo-info": "exifread",
+"pick-color": "colorpick",
+"pick-mic": "setmic",
+"pick-one": "pickone",
+"pilot-alphabet": "nato",
+"ping-friend": "ping",
+"play-tone": "tonegen",
+"pretty-json": "jsonfmt",
+"preview-markdown": "mdpreview",
+"prove-crypto": "selftest",
+"public-ip": "myip",
+"random": "rand",
+"read-aloud": "speak",
+"read-clipboard": "clipread",
+"read-pdf": "pdfview",
+"reading-level": "textstats",
+"received-files": "recvlist",
+"record-call": "recstart",
+"record-video": "videorec",
+"record-voice": "audiorec",
+"regex": "regextest",
+"remove-emoji": "emojistrip",
+"remove-friend": "untrust",
+"repair-link": "ice-restart",
+"repeat-text": "repeat",
+"reply-link": "rtcanswer",
+"resize-photo": "imgresize",
+"restore-friends": "importpeers",
+"rock-paper-scissors": "rps",
+"roll-dice": "diceroll",
+"roman-numerals": "roman",
+"save-backup": "exportcfg",
+"save-friends": "exportpeers",
+"save-key": "exportkey",
+"save-messages": "exportlog",
+"save-recording": "recsave",
+"saved-data": "lskeys",
+"scan-qr": "qrscan",
+"screen-info": "displayinfo",
+"seal-message": "seal",
+"search-messages": "inboxsearch",
+"secret-words": "words",
+"selfie": "camsnap",
+"send": "dispatch",
+"send-all": "broadcast",
+"send-device-card": "attest-send",
+"send-file": "sendfile",
+"send-message": "dispatch",
+"send-via-helper": "sigsend",
+"set-helper": "sigset",
+"set-trust": "trustlevel",
+"settings": "config",
+"setup": "config",
+"share-device-card": "attest-send",
+"share-screen": "screenshare",
+"shortcut": "alias",
+"show-qr": "qrgen",
+"shrink-photo": "imgresize",
+"sign": "esign",
+"site-cert": "certinfo",
+"site-cookies": "cookies",
+"site-databases": "idbkeys",
+"site-grade": "secheaders",
+"site-headers": "httphead",
+"site-speed": "fetchping",
+"site-timer": "restimer",
+"snap-screen": "screenshot",
+"song-info": "audiofmt",
+"sort": "sortlines",
+"sound-devices": "audioinfo",
+"speed-test": "speedtest",
+"split-bill": "tipcalc",
+"split-url": "urlparse",
+"stamp": "hmac",
+"stamp-file": "hmacfile",
+"start-call": "vcoffer",
+"start-link": "rtcoffer",
+"start-over": "reset",
+"status-meaning": "httpstatus",
+"stop-watch": "stopwatch",
+"stretch-password": "pbkdf2",
+"strong-fingerprint": "sha512",
+"strong-password": "passphrase",
+"tab-data": "sskeys",
+"take-photo": "camsnap",
+"talk": "speak",
+"tasks": "todo",
+"test-crypto": "selftest",
+"test-pattern": "regextest",
+"test-socket": "wstest",
+"test-speed": "ping",
+"text-to-file": "fileb64d",
+"this-phone": "deviceinfo",
+"tidy-json": "jsonfmt",
+"tilt": "devorient",
+"time-elsewhere": "tzconv",
+"time-site": "fetchping",
+"timed-id": "uuid7",
+"timer": "countdown",
+"to-base64": "b64e",
+"to-do": "todo",
+"to-hex": "hexdump",
+"true-time": "ntpdate",
+"unlock-text": "unlock",
+"unpair": "untrust",
+"upside-down": "fliptext",
+"url-slug": "slugify",
+"verify-key": "importkey",
+"verify-signature": "everify",
+"verify-words": "words",
+"view-spreadsheet": "csvview",
+"voice-call": "vcoffer",
+"voice-to-text": "stt",
+"watch": "mon",
+"watch-friends": "watchdog",
+"what-browser": "uaparse",
+"what-can-i-do": "help",
+"what-does-404-mean": "httpstatus",
+"what-is-my-ip": "myip",
+"what-schedule": "crondesc",
+"where-am-i": "geolocate",
+"where-does-it-go": "redirtrace",
+"which-way": "devorient",
+"who-is-here": "presence",
+"who-made-it": "macvendor",
+"whoami": "myid",
+"whois": "rdap",
+"wifi-address": "localips",
+"wipe": "reset",
+"wisdom": "quote",
+"world-clock": "tzconv",
+};
+const PRIMARY_ALIAS = {
+"aesbench": "crypto-speed",
+"alias": "shortcut",
+"attest": "device-card",
+"attest-send": "send-device-card",
+"attest-verify": "check-device-card",
+"audiofmt": "song-info",
+"audioinfo": "sound-devices",
+"audiorec": "record-voice",
+"b64d": "decode64",
+"b64e": "encode64",
+"baseconv": "convert-number",
+"battery": "battery-level",
+"broadcast": "announce",
+"calc": "calculator",
+"callstats": "call-quality",
+"camoff": "camera-toggle",
+"camsnap": "selfie",
+"candidates": "my-addresses",
+"caseconv": "change-case",
+"certinfo": "check-cert",
+"clear": "cls",
+"clipread": "paste",
+"clipwrite": "copy",
+"coinflip": "coin",
+"colorconv": "convert-color",
+"colorpick": "grab-color",
+"config": "my-setup",
+"contrast": "is-readable",
+"cookies": "site-cookies",
+"corscheck": "can-sites-read",
+"countdown": "timer",
+"crondesc": "explain-cron",
+"csspx": "convert-px",
+"csv2json": "csv-to-json",
+"csvview": "view-spreadsheet",
+"dadjoke": "joke",
+"dclog": "link-log",
+"deviceinfo": "phone-info",
+"devices": "list-devices",
+"devorient": "tilt",
+"diceroll": "dice",
+"dispatch": "dm",
+"displayinfo": "screen-info",
+"doh": "dns-lookup",
+"dohcf": "cloudflare-dns",
+"eightball": "ask-ball",
+"emojistrip": "remove-emoji",
+"entropy": "how-strong",
+"esign": "sign",
+"everify": "check-signature",
+"excerpt": "first-words",
+"exifread": "camera-info",
+"exportcfg": "backup-everything",
+"exportkey": "download-key",
+"exportlog": "backup-messages",
+"exportpeers": "backup-friends",
+"fetchping": "site-speed",
+"fileb64d": "text-to-file",
+"fileb64e": "file-to-text",
+"fliptext": "upside-down",
+"fontlist": "fonts",
+"geolocate": "gps",
+"getfile": "download-file",
+"hangup": "disconnect",
+"heartbeat": "heartbeat-toggle",
+"help": "commands",
+"hexdump": "to-hex",
+"histlen": "history-count",
+"hmac": "stamp",
+"hmacfile": "stamp-file",
+"htmlesc": "escape-html",
+"httpget": "download-page",
+"httphead": "peek-site",
+"httpstatus": "status-meaning",
+"ice-restart": "fix-link",
+"idbkeys": "site-databases",
+"imgconvert": "convert-photo",
+"imgresize": "resize-photo",
+"importkey": "check-key",
+"importpeers": "restore-friends",
+"inbox": "messages",
+"inboxclear": "clear-messages",
+"inboxsearch": "find-message",
+"json2csv": "json-to-csv",
+"jsonfmt": "pretty-json",
+"jwtdecode": "decode-token",
+"localips": "local-addresses",
+"lock": "encrypt-text",
+"lorem": "filler-text",
+"lskeys": "saved-data",
+"macvendor": "card-maker",
+"mdpreview": "preview-markdown",
+"metronome": "beat-keeper",
+"mimetypes": "file-types",
+"mon": "monitor",
+"monlist": "monitors",
+"morse": "morse-code",
+"msginfo": "message-detail",
+"mute": "mute-mic",
+"myid": "my-fingerprint",
+"myip": "my-internet-address",
+"nato": "pilot-alphabet",
+"netinfo": "connection-type",
+"newid": "fresh-start",
+"noisemeter": "how-loud",
+"notes": "notebook",
+"notify": "alert-me",
+"ntpdate": "atomic-clock",
+"onoffinfo": "am-i-online",
+"openenv": "decrypt-test",
+"passphrase": "new-password",
+"pbkdf2": "stretch-password",
+"pdfview": "open-pdf",
+"peerinfo": "friend-info",
+"peers": "friends",
+"pickone": "choose-for-me",
+"ping": "ping-friend",
+"plugins": "addons",
+"pomodoro": "focus-timer",
+"porthint": "is-port-open",
+"presence": "online-now",
+"qrbatch": "many-qrs",
+"qrgen": "my-qr",
+"qrscan": "scan-qr",
+"quote": "wisdom",
+"rand": "random",
+"rdap": "domain-info",
+"recsave": "save-recording",
+"recstart": "record-call",
+"recvlist": "received-files",
+"redirtrace": "follow-link",
+"regextest": "regex",
+"repeat": "repeat-text",
+"reqbuilder": "custom-request",
+"reset": "factory-reset",
+"restimer": "site-timer",
+"roman": "roman-numerals",
+"rps": "rock-paper-scissors",
+"rtcaccept": "complete-link",
+"rtcanswer": "answer-link",
+"rtclist": "links",
+"rtcoffer": "connect",
+"rtcstate": "link-status",
+"rtcstats": "link-stats",
+"rtt": "last-ping",
+"screenshare": "share-screen",
+"screenshot": "snap-screen",
+"seal": "encrypt-test",
+"secheaders": "grade-site",
+"selftest": "prove-crypto",
+"sendfile": "send-file",
+"sensors": "motion-sensor",
+"setmic": "choose-mic",
+"sha256": "fingerprint",
+"sha512": "strong-fingerprint",
+"sigsend": "send-via-helper",
+"sigset": "helper-server",
+"slugify": "url-slug",
+"sortlines": "sort",
+"sos": "emergency-beacon",
+"speak": "read-aloud",
+"speedtest": "internet-speed",
+"sskeys": "tab-data",
+"stopwatch": "stop-watch",
+"storage": "free-space",
+"stt": "dictate",
+"subnet": "ip-math",
+"textdiff": "compare-text",
+"textstats": "reading-level",
+"theme": "dark-mode",
+"time": "clock",
+"tipcalc": "split-bill",
+"todo": "tasks",
+"tonegen": "play-tone",
+"totp": "auth-code",
+"touchinfo": "is-touch",
+"trust": "add-friend",
+"trustlevel": "friend-level",
+"tzconv": "time-elsewhere",
+"uaparse": "what-browser",
+"unicode": "char-codes",
+"unitconv": "convert-units",
+"unlock": "decrypt-text",
+"untrust": "remove-friend",
+"urldecode": "decode-url",
+"urlencode": "encode-url",
+"urlparse": "split-url",
+"uuid": "new-uuid",
+"uuid7": "new-id",
+"vcaccept": "join-call",
+"vcanswer": "answer-call",
+"vchangup": "end-call",
+"vcoffer": "call",
+"vibrate": "buzz",
+"videorec": "record-video",
+"wakelock": "keep-awake",
+"watchdog": "watch-friends",
+"wordcount": "count-words",
+"words": "secret-words",
+"wrapdemo": "key-wrap",
+"wstest": "test-socket",
+};
+
 const hist = []; let hi = 0;
 async function runLine(line) {
   print('<span class="acc">gkk&gt;</span> ' + esc(line));
   const parts = line.trim().split(/\s+/).filter(Boolean);
   if (!parts.length) return;
-  const name = S.aliases[parts[0].toLowerCase()] || parts[0].toLowerCase();
+  const raw = parts[0].toLowerCase();
+  const name = S.aliases[raw] || BUILTIN_ALIASES[raw] || raw;
   const c = CMDS[name];
-  if (!c) { print("unknown command: " + esc(parts[0]) + " — try 'help'", "err"); return; }
+  if (!c) {
+    // suggest close matches (typo help) instead of a dead end
+    const keys = Object.keys(CMDS).concat(Object.keys(BUILTIN_ALIASES));
+    const sug = keys.filter((k) => k.includes(raw) || raw.includes(k)).slice(0, 3);
+    print("unknown command: " + esc(parts[0]) + (sug.length ? " — did you mean: " + sug.join(", ") + "?" : " — try 'help' or 'commands'"), "err");
+    return;
+  }
   try { await c.fn(parts.slice(1), line); } catch (e) { print("error: " + e.message, "err"); }
 }
 input.addEventListener("keydown", (e) => {
@@ -221,7 +743,16 @@ input.addEventListener("keydown", (e) => {
 });
 
 /* ---------- peers ---------- */
-function needPeer(name) { const p = S.peers.get(name); if (!p) throw new Error("no such peer: '" + name + "'"); return p; }
+function needPeer(name) {
+  const p = S.peers.get(name);
+  if (!p) {
+    const known = [...S.peers.keys()];
+    throw new Error("I don't know anyone called '" + name + "'" +
+      (known.length ? " — your friends: " + known.join(", ") : " — no friends added yet") +
+      ". Add them first: add-friend <name> <their-public-key>  (they get their key from: my-identity)");
+  }
+  return p;
+}
 async function addPeer(name, pubB64, trust) {
   const spki = b64d(pubB64.replace(/\s/g, ""));
   const pubKey = await GkkCrypto.importPeerPublicKey(spki);
@@ -367,9 +898,10 @@ cmd("rand", "usage: rand [bytes] — secure random hex", async (a) => {
 
 /* ---------- B. peers (10) ---------- */
 cmd("trust", "usage: trust <name> <spki-base64>", async (a) => {
-  if (a.length < 2) throw new Error("usage: trust <name> <spki-base64>");
+  if (a.length < 2) throw new Error("to add a friend:\n  1. they run: my-identity  (or tap 'My identity card')\n  2. they send you the 'spki b64' text\n  3. you run: add-friend <their-name> <paste-their-key>");
   const p = await addPeer(a[0], a.slice(1).join(""), 0);
-  println("paired " + p.name + " [" + p.idHex + "]\nwords: " + GkkCrypto.verificationWords(idToBytes(p)));
+  println("paired " + p.name + " [" + p.idHex + "]\nwords: " + GkkCrypto.verificationWords(idToBytes(p)) +
+    "\nRead these 4 words to them on a call — if they match, no one is in the middle.\nNext: link up with  connect " + p.name);
 });
 cmd("peers", "list paired peers", async () => {
   if (!S.peers.size) { println("(none)"); return; }
@@ -582,7 +1114,10 @@ cmd("rtcoffer", "usage: rtcoffer <peer> — create offer", async (a) => {
   attachDC(p, dc);
   await pc.setLocalDescription(await pc.createOffer());
   await waitGathering(pc);
-  println("offer for " + p.name + " (paste into their rtcanswer):\n" + sdpB64(pc.localDescription));
+  println("STEP 1/3 — send this to " + p.name + " (any chat app):\n" + sdpB64(pc.localDescription) +
+    "\n\nSTEP 2/3 — they run: answer-link " + p.name + " <paste-your-text-above>" +
+    "\nSTEP 3/3 — they send you back an answer, you run: finish-link " + p.name + " <paste-their-answer>" +
+    "\nTip: 'connect' works too — it's the plain name for this.");
 });
 cmd("rtcanswer", "usage: rtcanswer <peer> <offer-b64>", async (a) => {
   const p = needPeer(a[0]); if (!a[1]) throw new Error("usage: rtcanswer <peer> <offer-b64>");
@@ -591,13 +1126,15 @@ cmd("rtcanswer", "usage: rtcanswer <peer> <offer-b64>", async (a) => {
   await pc.setRemoteDescription(unB64(a[1]));
   await pc.setLocalDescription(await pc.createAnswer());
   await waitGathering(pc);
-  println("answer for " + p.name + ":\n" + sdpB64(pc.localDescription));
+  println("STEP 2/3 done — send this answer back to them (any chat app):\n" + sdpB64(pc.localDescription) +
+    "\n\nThey finish with: finish-link <your-name> <paste-this-answer>\nThen you're linked — try: send <their-name> hello");
 });
 cmd("rtcaccept", "usage: rtcaccept <peer> <answer-b64>", async (a) => {
   const p = needPeer(a[0]); const l = linkFor(p.name);
   if (!a[1]) throw new Error("usage: rtcaccept <peer> <answer-b64>");
   await l.pc.setRemoteDescription(unB64(a[1]));
-  println("answer applied — connecting to " + p.name + "…");
+  println("answer applied — linking to " + p.name + "… watch the LINK panel up top." +
+    "\nOnce it says 'open', try: send " + p.name + " hello");
 });
 function closeLinkSilent(name) {
   const l = S.links.get(name);
@@ -705,9 +1242,10 @@ cmd("rtt", "last measured round-trip ms", async () => {
 /* ---------- D. messaging (14) ---------- */
 cmd("dispatch", "usage: dispatch <peer> <text>", async (a) => {
   const p = needPeer(a[0]); const text = a.slice(1).join(" ");
-  if (!text) throw new Error("usage: dispatch <peer> <text>");
+  if (!text) throw new Error("usage: send " + p.name + " <your message>");
   const l = linkFor(p.name);
-  if (!l.dc || l.dc.readyState !== "open") throw new Error("data channel not open — connect first");
+  if (!l.dc || l.dc.readyState !== "open")
+    throw new Error("not linked to " + p.name + " yet — link first:\n  1. you: connect " + p.name + "\n  2. send them the text it prints\n  3. finish-link " + p.name + " <their answer>\nThen: send " + p.name + " <message>");
   const { tag } = await sendKind(p, "msg", { text });
   S.ackWait.set(tag, Date.now());
   inboxAdd({ name: "me→" + p.name }, "msg", text);
@@ -1155,9 +1693,22 @@ cmd("mon", "usage: mon <battery|net|rtc|peers|clock|perf|all> on|off", async (a)
   println("monitors: " + ([...S.monSet].join(", ") || "(none)"));
 });
 cmd("monlist", "available monitors", async () => { println(Object.keys(MONS).join(" ")); });
-cmd("help", "list all commands", async () => {
+cmd("help", "list all commands", async (a) => {
+  const aka = (n) => Object.keys(BUILTIN_ALIASES).filter((k) => BUILTIN_ALIASES[k] === n);
+  if (a[0]) {
+    const raw = a[0].toLowerCase();
+    const n = S.aliases[raw] || BUILTIN_ALIASES[raw] || raw;
+    const c = CMDS[n];
+    if (!c) throw new Error("no such command: " + a[0]);
+    const al = aka(n);
+    println(n + (al.length ? "  (also: " + al.join(", ") + ")" : "") + "\n" + c.help);
+    return;
+  }
   const names = Object.keys(CMDS).sort();
-  println(names.map((n) => n.padEnd(14) + CMDS[n].help).join("\n") + "\n\n" + names.length + " commands. Envelope v1 interop with the Android app is byte-exact (proven: web/interop-test).");
+  println(names.map((n) => {
+    const al = aka(n);
+    return n.padEnd(14) + (al.length ? ("[" + al.slice(0, 2).join(", ") + "]").padEnd(24) : "".padEnd(24)) + CMDS[n].help;
+  }).join("\n") + "\n\n" + names.length + " commands, " + Object.keys(BUILTIN_ALIASES).length + " plain-English names. Try 'help send' or just type what you want: 'send', 'call', 'timer'.");
 });
 cmd("clear", "clear terminal", async () => { term.innerHTML = ""; });
 cmd("theme", "toggle dark/light", async () => {
@@ -1167,7 +1718,16 @@ cmd("theme", "toggle dark/light", async () => {
   println("theme: " + S.theme);
 });
 cmd("alias", "usage: alias <name> <command> | alias (list)", async (a) => {
-  if (!a[0]) { const ks = Object.keys(S.aliases); println(ks.length ? ks.map((k) => k + " -> " + S.aliases[k]).join("\n") : "(none)"); return; }
+  if (a[0] && a[0].toLowerCase() === "builtins") {
+    println(Object.keys(BUILTIN_ALIASES).sort().map((k) => k + " -> " + BUILTIN_ALIASES[k]).join("\n"));
+    return;
+  }
+  if (!a[0]) {
+    const ks = Object.keys(S.aliases);
+    println((ks.length ? "yours:\n" + ks.map((k) => k + " -> " + S.aliases[k]).join("\n") + "\n\n" : "") +
+      Object.keys(BUILTIN_ALIASES).length + " built-in plain names ship with the app — 'alias builtins' to see them all.\nAdd your own: alias <name> <command>");
+    return;
+  }
   if (a.length < 2) throw new Error("usage: alias <name> <command>");
   S.aliases[a[0].toLowerCase()] = a[1].toLowerCase();
   store.set("aliases", S.aliases);
@@ -2698,7 +3258,7 @@ function renderDash(filter) {
   g.innerHTML = "";
   let shown = 0;
   for (const [cat, cards] of DASH) {
-    const hit = cards.filter((c) => !q || c[0].includes(q) || c[2].toLowerCase().includes(q) || c[3].toLowerCase().includes(q));
+    const hit = cards.filter((c) => !q || c[0].includes(q) || c[2].toLowerCase().includes(q) || c[3].toLowerCase().includes(q) || (PRIMARY_ALIAS[c[0]] || "").includes(q));
     if (!hit.length) continue;
     const h = document.createElement("div");
     h.className = "dash-cat"; h.textContent = cat + " (" + hit.length + ")";
@@ -2708,7 +3268,8 @@ function renderDash(filter) {
     for (const [cmdName, icon, name, desc, mode] of hit) {
       const el = document.createElement("div");
       el.className = "card";
-      el.innerHTML = '<div class="ci">' + icon + '</div><div class="cn">' + esc(name) + '</div><div class="cd">' + esc(desc) + '</div><div class="cc">' + esc(cmdName) + (mode === "fill" ? " — needs input" : "") + "</div>";
+      const aka = PRIMARY_ALIAS[cmdName] ? ' <span style="opacity:.75">aka ' + esc(PRIMARY_ALIAS[cmdName]) + '</span>' : '';
+      el.innerHTML = '<div class="ci">' + icon + '</div><div class="cn">' + esc(name) + '</div><div class="cd">' + esc(desc) + '</div><div class="cc">' + esc(cmdName) + aka + (mode === "fill" ? " — needs input" : "") + "</div>";
       el.onclick = () => dashClick(cmdName, mode);
       grid.appendChild(el);
     }
