@@ -88,6 +88,7 @@ const store = {
 };
 const S = {
   idHex: null, words: null, pubB64: null,
+  cooked: false, // Operators Cookbook unlocked for this tab only
   peers: new Map(),   // name -> {name, pubB64, pubKey, idHex, trust, seqSend, seqSeen, lastSeen, online}
   inbox: [],          // {id, from, kind, text, ts}
   ackWait: new Map(), // tag -> t0
@@ -514,6 +515,21 @@ const BUILTIN_ALIASES = {
 "wipe": "reset",
 "wisdom": "quote",
 "world-clock": "tzconv",
+"clear-cache": "cfpurge",
+"cloudflare-zones": "cfzones",
+"deep-dive": "domaindeep",
+"dns-records": "cfdns",
+"domain-recon": "domaindeep",
+"investigate-domain": "domaindeep",
+"list-dns": "cfdns",
+"lock-cookbook": "cookbook",
+"my-zones": "cfzones",
+"operators": "cookbook",
+"purge-cache": "cfpurge",
+"recon": "domaindeep",
+"unlock-cookbook": "cookbook",
+"zone-dns": "cfdns",
+"zones": "cfzones",
 };
 const PRIMARY_ALIAS = {
 "aesbench": "crypto-speed",
@@ -717,6 +733,11 @@ const PRIMARY_ALIAS = {
 "words": "secret-words",
 "wrapdemo": "key-wrap",
 "wstest": "test-socket",
+"cfpurge": "clear-cache",
+"cfzones": "cloudflare-zones",
+"domaindeep": "deep-dive",
+"cfdns": "dns-records",
+"cookbook": "lock-cookbook",
 };
 
 const hist = []; let hi = 0;
@@ -732,6 +753,10 @@ async function runLine(line) {
     const keys = Object.keys(CMDS).concat(Object.keys(BUILTIN_ALIASES));
     const sug = keys.filter((k) => k.includes(raw) || raw.includes(k)).slice(0, 3);
     print("unknown command: " + esc(parts[0]) + (sug.length ? " — did you mean: " + sug.join(", ") + "?" : " — try 'help' or 'commands'"), "err");
+    return;
+  }
+  if (typeof COOKBOOK !== "undefined" && COOKBOOK.has(name) && !S.cooked && name !== "cookbook") {
+    print("🔒 the Operators Cookbook is locked — unlock it first: <span class=\"acc\">cookbook &lt;master-key&gt;</span>", "err");
     return;
   }
   try { await c.fn(parts.slice(1), line); } catch (e) { print("error: " + e.message, "err"); }
@@ -1662,6 +1687,121 @@ cmd("aesbench", "AES-256-GCM throughput (WebCrypto)", async () => {
   const sec = (performance.now() - t0) / 1000;
   println(MB + " MB in " + sec.toFixed(2) + "s = " + (MB / sec).toFixed(0) + " MB/s (AES-256-GCM)");
 });
+
+/* ---------- Operators Cookbook: gated advanced ops (master key) ---------- */
+/* The gate is a convenience lock in page source — it keeps casual eyes out, not
+   attackers. It does NOT touch the casino platform's server-side ADMIN_KEY. */
+const MASTER_KEY = "monalisa";
+function masterEq(a, b) {
+  a = String(a); b = String(b);
+  if (a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
+}
+cmd("cookbook", "unlock the Operators Cookbook with your master key", async (a) => {
+  const sub = (a[0] || "").toLowerCase();
+  if (sub === "lock") { S.cooked = false; println("cookbook locked."); return; }
+  if (sub === "status") { println(S.cooked ? "cookbook: UNLOCKED (this tab only — close the tab to lock)" : "cookbook: locked"); return; }
+  if (!a[0]) throw new Error("usage: cookbook <master-key>  — unlocks the advanced ops tools for this tab");
+  if (!masterEq(a[0], MASTER_KEY)) throw new Error("wrong key");
+  S.cooked = true;
+  println("cookbook unlocked for this tab.\nAdvanced tools live under the 'Operators Cookbook' shelf on the dashboard.");
+});
+cmd("domaindeep", "full recon on a domain: DNS, registration, certificates, headers", async (a) => {
+  let d = (a[0] || "").toLowerCase().replace(/^https?:\/\//, "").split("/")[0].trim();
+  if (!d || !d.includes(".")) throw new Error("usage: domaindeep <domain>  e.g. domaindeep example.com");
+  const out = ["=== " + d + " ==="];
+  out.push("-- DNS (live) --");
+  for (const t of ["A", "AAAA", "MX", "TXT", "NS", "CNAME", "SOA"]) {
+    try {
+      const r = await fetch("https://cloudflare-dns.com/dns-query?name=" + encodeURIComponent(d) + "&type=" + t,
+        { headers: { accept: "application/dns-json" } });
+      const j = await r.json();
+      const ans = (j.Answer || []).map((x) => x.data).join(" | ");
+      out.push(t.padEnd(6) + (ans || "(none)"));
+    } catch (e) { out.push(t.padEnd(6) + "lookup failed (" + e.message + ")"); }
+  }
+  out.push("-- registration (RDAP, live) --");
+  try {
+    const r = await fetch("https://rdap.org/domain/" + encodeURIComponent(d));
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const j = await r.json();
+    const reg = (j.entities || []).find((e) => (e.roles || []).includes("registrar"));
+    let regName = "?";
+    if (reg && reg.vcardArray) { const fn = reg.vcardArray[1].find((v) => v[0] === "fn"); if (fn) regName = fn[3]; }
+    const ev = {};
+    for (const e of (j.events || [])) ev[e.eventAction] = (e.eventDate || "").slice(0, 10);
+    out.push("registrar: " + regName);
+    out.push("created: " + (ev.registration || "?") + "   expires: " + (ev.expiration || "?") + "   updated: " + (ev["last changed"] || "?"));
+    out.push("status: " + ((j.status || []).join(", ") || "?"));
+    const ns = (j.nameservers || []).map((n) => n.ldhName).filter(Boolean).join(", ");
+    if (ns) out.push("nameservers: " + ns);
+  } catch (e) { out.push("RDAP failed: " + e.message); }
+  out.push("-- certificates seen in the wild (crt.sh, live) --");
+  try {
+    const r = await fetch("https://crt.sh/?q=" + encodeURIComponent(d) + "&output=json");
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const j = await r.json();
+    const names = [...new Set(j.flatMap((c) => String(c.name_value || "").split("\n")))].filter((n) => n && !n.startsWith("*")).slice(0, 12);
+    const latest = j.map((c) => c.not_after).filter(Boolean).sort().pop();
+    out.push("certs found: " + j.length + "   latest expiry: " + (latest ? latest.slice(0, 10) : "?"));
+    if (names.length) out.push("names on certs: " + names.join(", ") + (j.length > names.length ? " ..." : ""));
+  } catch (e) { out.push("crt.sh failed: " + e.message); }
+  out.push("-- web server headers (live) --");
+  try {
+    const r = await fetch("https://" + d, { method: "HEAD", redirect: "follow" });
+    const grade = (h, good) => (h ? (good.test(h) ? "good" : "weak: " + h.slice(0, 40)) : "MISSING");
+    const H = (n) => r.headers.get(n);
+    out.push("server: " + (H("server") || "?") + "   powered-by: " + (H("x-powered-by") || "?"));
+    out.push("hsts: " + grade(H("strict-transport-security"), /max-age=\d+/) +
+      "   csp: " + (H("content-security-policy") ? "present" : "MISSING") +
+      "   x-frame: " + (H("x-frame-options") || "MISSING"));
+    out.push("final url: " + r.url + "  (HTTP " + r.status + ")");
+  } catch (e) { out.push("header fetch failed (site may block cross-site reads): " + e.message); }
+  println(out.join("\n"));
+});
+function cfToken() {
+  const t = cfgGet("cftoken");
+  if (!t) throw new Error("no Cloudflare token saved — run: config set cftoken <token>\nCreate one at dash.cloudflare.com/profile/api-tokens (Zone:Read at minimum; DNS:Edit to change records)");
+  return t;
+}
+async function cf(path, method, body) {
+  const r = await fetch("https://api.cloudflare.com/client/v4" + path, {
+    method: method || "GET",
+    headers: { Authorization: "Bearer " + cfToken(), "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const j = await r.json();
+  if (!j.success) throw new Error("Cloudflare: " + (j.errors || []).map((e) => e.message).join("; "));
+  return j.result;
+}
+async function cfZoneId(nameOrId) {
+  if (/^[0-9a-f]{32}$/.test(nameOrId)) return nameOrId;
+  const zones = await cf("/zones?per_page=50");
+  const z = zones.find((x) => x.name === nameOrId.toLowerCase());
+  if (!z) throw new Error("no zone '" + nameOrId + "' — run cfzones to list them");
+  return z.id;
+}
+cmd("cfzones", "list your Cloudflare zones (needs: config set cftoken)", async () => {
+  const z = await cf("/zones?per_page=50");
+  println(z.length ? z.map((x) => x.name.padEnd(28) + x.id + "  " + x.status + "  " + (x.plan ? x.plan.name : "?")).join("\n") : "(no zones on this token)");
+});
+cmd("cfdns", "list DNS records: cfdns <zone-name-or-id> [type] [name]", async (a) => {
+  if (!a[0]) throw new Error("usage: cfdns <zone> [type] [name]   e.g. cfdns example.com A www");
+  const zid = await cfZoneId(a[0]);
+  let q = "/zones/" + zid + "/dns_records?per_page=100";
+  if (a[1]) q += "&type=" + encodeURIComponent(a[1].toUpperCase());
+  if (a[2]) q += "&name=" + encodeURIComponent(a[2]);
+  const recs = await cf(q);
+  println(recs.length ? recs.map((r) => r.type.padEnd(6) + r.name.padEnd(36) + r.content + (r.proxied ? "  [proxied]" : "")).join("\n") : "(no records match)");
+});
+cmd("cfpurge", "purge Cloudflare cache: cfpurge <zone> yes", async (a) => {
+  if (!a[0] || a[1] !== "yes") throw new Error("usage: cfpurge <zone> yes  — the 'yes' is required, this clears the cache");
+  const zid = await cfZoneId(a[0]);
+  await cf("/zones/" + zid + "/purge_cache", "POST", { purge_everything: true });
+  println("cache purged for zone " + zid);
+});
 </script>
 <script>
 "use strict";
@@ -1875,8 +2015,38 @@ cmd("unlock", "open text that was locked with a password", async (a, line) => {
     println(new TextDecoder().decode(pt));
   } catch (e) { throw new Error("wrong password or damaged text"); }
 });
+let _zxcvbn = null;
+async function zxcvbnLoad() {
+  if (_zxcvbn) return _zxcvbn;
+  if (window.zxcvbn) { _zxcvbn = window.zxcvbn; return _zxcvbn; }
+  await new Promise((res, rej) => {
+    const el = document.createElement("script");
+    el.src = "https://cdn.jsdelivr.net/npm/zxcvbn@4.4.2/dist/zxcvbn.js";
+    el.onload = res; el.onerror = () => rej(new Error("zxcvbn CDN unreachable"));
+    document.head.appendChild(el);
+    setTimeout(() => rej(new Error("zxcvbn load timed out")), 15000);
+  });
+  _zxcvbn = window.zxcvbn || null;
+  return _zxcvbn;
+}
 cmd("entropy", "guess how hard a password is to crack", async (a) => {
   const pw = a.join(" "); if (!pw) throw new Error("usage: entropy <password>");
+  // real estimator first (Dropbox zxcvbn, lazy-loaded once), honest fallback if offline
+  try {
+    const z = await zxcvbnLoad();
+    if (z) {
+      const r = z(pw);
+      const labels = ["very weak", "weak", "okay", "strong", "very strong"];
+      let extra = "";
+      if (r.feedback.warning) extra += "\nwarning: " + r.feedback.warning;
+      if (r.feedback.suggestions && r.feedback.suggestions.length) extra += "\nsuggestions: " + r.feedback.suggestions.join(" ");
+      if (r.sequence && r.sequence.length) extra += "\npatterns: " + [...new Set(r.sequence.map((m) => m.pattern))].join(", ");
+      println("score " + r.score + "/4 — " + labels[r.score] + extra +
+        "\ncrack time: " + (r.crack_times_display.offline_slow_hashing_1e4_per_second || "?") + " (offline, slow hash)" +
+        "\n(checked against real dictionaries, not just character math)");
+      return;
+    }
+  } catch (e) { /* fall through to estimate */ }
   let pool = 0;
   if (/[a-z]/.test(pw)) pool += 26;
   if (/[A-Z]/.test(pw)) pool += 26;
@@ -1884,7 +2054,7 @@ cmd("entropy", "guess how hard a password is to crack", async (a) => {
   if (/[^a-zA-Z0-9]/.test(pw)) pool += 32;
   const bits = Math.round(pw.length * Math.log2(pool || 1));
   const verdict = bits < 40 ? "weak" : bits < 60 ? "okay" : bits < 80 ? "strong" : "very strong";
-  println(bits + " bits — " + verdict + " (rough estimate, assumes random characters)");
+  println(bits + " bits — " + verdict + " (rough estimate, assumes random characters; offline fallback)");
 });
 cmd("certinfo", "look up a website's public security certificates", async (a) => {
   if (!a[0]) throw new Error("usage: certinfo <domain>");
@@ -3101,33 +3271,38 @@ const DASH = [
  ["devices","\u0001F399\uFE0F","Cameras & mics","List your cameras and microphones","run"],
  ["setmic","\u0001F3A4","Choose microphone","Pick which mic calls use","fill"]
 ]],
-["\u0001F9F0 Toolbox", [
- ["httphead","\u0001F4C4","Page headers","Peek at a website's technical headers","fill"],
- ["httpget","\u0001F310","Fetch a page","Download what an address returns","fill"],
- ["doh","\u0001F50D","Find a website (Google)","Look up a domain via Google","fill"],
- ["rdap","\u0001F3E2","Who owns a domain?","Domain registration info","fill"],
- ["speedtest","\u0001F680","Speed test","How fast is your internet?","run"],
- ["fetchping","\u0001F3D3","Ping a website","Time how fast a page answers","fill"],
- ["battery","\u0001F50B","Battery status","How much charge is left","run"],
+["\U0001F9F0 Toolbox", [ ["battery","\u0001F50B","Battery status","How much charge is left","run"],
  ["deviceinfo","\u0001F4F1","About this device","Browser and hardware facts","run"],
  ["displayinfo","\u0001F5A5\uFE0F","Screen info","Size and sharpness","run"],
  ["netinfo","\u0001F4F6","Internet type","WiFi/4G speed details","run"],
  ["storage","\u0001F4BD","Storage space","What sites are storing here","run"],
- ["geolocate","\u0001F4CD","Where am I?","Your GPS location","run"],
  ["sensors","\u0001F9ED","Motion sensors","Tilt and movement readings","run"],
  ["audioinfo","\u0001F50A","Sound devices","Speakers and microphones","run"],
- ["clipread","\u0001F4CB","Read clipboard","What's copied right now","run"],
  ["clipwrite","\u270F\uFE0F","Copy to clipboard","Put text on the clipboard","fill"],
  ["vibrate","\u0001F4F3","Vibrate","Buzz the phone","run"],
  ["wakelock","\u2600\uFE0F","Keep screen awake","Stop the screen sleeping (on/off)","fill"],
  ["notify","\u0001F514","Pop a notification","Show a message on screen","fill"],
  ["time","\u0001F550","Exact time","Clock, timezone, timestamps","run"],
- ["ntpdate","\u0001F570\uFE0F","Check my clock","Is your clock fast or slow?","run"],
  ["uuid","\u0001F194","Make an ID","A random unique ID","run"],
  ["b64e","\u0001F524","Text to code","Turn text into paste-safe code","fill"],
- ["b64d","\u0001F524","Code to text","Turn the code back into text","fill"],
+ ["b64d","\u0001F524","Code to text","Turn the code back into text","fill"]
+]],
+["\U0001F4D6 Operators Cookbook", [ ["httphead","\u0001F4C4","Page headers","Peek at a website's technical headers","fill"],
+ ["httpget","\u0001F310","Fetch a page","Download what an address returns","fill"],
+ ["doh","\u0001F50D","Find a website (Google)","Look up a domain via Google","fill"],
+ ["rdap","\u0001F3E2","Who owns a domain?","Domain registration info","fill"],
+ ["speedtest","\u0001F680","Speed test","How fast is your internet?","run"],
+ ["fetchping","\u0001F3D3","Ping a website","Time how fast a page answers","fill"],
+ ["geolocate","\u0001F4CD","Where am I?","Your GPS location","run"],
+ ["clipread","\u0001F4CB","Read clipboard","What's copied right now","run"],
+ ["ntpdate","\u0001F570\uFE0F","Check my clock","Is your clock fast or slow?","run"],
  ["hexdump","\u0001F522","See the bytes","Text as raw computer bytes","fill"],
- ["aesbench","\u26A1","Encryption speed","How fast is this device?","run"]
+ ["aesbench","\u26A1","Encryption speed","How fast is this device?","run"],
+ ["cookbook","\u0001F510","Cookbook key","Unlock the advanced ops shelf with your master key","fill"],
+ ["domaindeep","\U0001F50D","Deep domain recon","DNS, registration, certificates and headers, one report","fill"],
+ ["cfzones","\u2601\uFE0F","My Cloudflare zones","List every zone on your Cloudflare token","run"],
+ ["cfdns","\U0001F4DD","Zone DNS records","List a zone's DNS records, filter by type or name","fill"],
+ ["cfpurge","\U0001F525","Purge zone cache","Clear Cloudflare's cache for a zone (asks for yes)","fill"]
 ]],
 ["\u0001F4DD Words & files", [
  ["wordcount","\u0001F522","Count words","Words, characters, lines","fill"],
@@ -3242,6 +3417,9 @@ const DASH = [
  ["reset","\u26A0\uFE0F","Erase everything","Wipe identity and data","fill"]
 ]]
 ];
+/* gated: Operators Cookbook commands need the master key (this tab) */
+const COOKBOOK = new Set(['aesbench', 'cfdns', 'cfpurge', 'cfzones', 'clipread', 'cookbook', 'doh', 'domaindeep', 'fetchping', 'geolocate', 'hexdump', 'httpget', 'httphead', 'ntpdate', 'rdap', 'speedtest']);
+
 function showView(v) {
   const dash = v === "dash";
   $("dash").style.display = dash ? "block" : "none";
@@ -3258,6 +3436,21 @@ function renderDash(filter) {
   g.innerHTML = "";
   let shown = 0;
   for (const [cat, cards] of DASH) {
+    if (cat.includes("Operators Cookbook") && !S.cooked) {
+      const h = document.createElement("div");
+      h.className = "dash-cat"; h.textContent = cat + " (locked)";
+      g.appendChild(h);
+      const grid = document.createElement("div");
+      grid.className = "dash-grid";
+      const el = document.createElement("div");
+      el.className = "card";
+      el.innerHTML = '<div class="ci">🔒</div><div class="cn">Operators Cookbook</div><div class="cd">16 advanced ops tools inside — master key required. Tap to unlock.</div><div class="cc">cookbook</div>';
+      el.onclick = () => { showView("term"); input.value = "cookbook "; setTimeout(() => input.focus(), 50); };
+      grid.appendChild(el);
+      g.appendChild(grid);
+      shown += 1;
+      continue;
+    }
     const hit = cards.filter((c) => !q || c[0].includes(q) || c[2].toLowerCase().includes(q) || c[3].toLowerCase().includes(q) || (PRIMARY_ALIAS[c[0]] || "").includes(q));
     if (!hit.length) continue;
     const h = document.createElement("div");
