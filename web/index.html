@@ -497,46 +497,91 @@ const BUILTIN_ALIASES = {
 "verify-key": "importkey",
 "verify-signature": "everify",
 "verify-words": "words",
+"all-dns-records": "dnsall",
+"archived-urls": "waybackurls",
+"blocklist-check": "reputation",
+"clear-cache": "cfpurge",
+"cloudflare-zones": "cfzones",
+"dangling-dns": "dangling",
+"deep-dive": "domaindeep",
+"detect-tech": "techfp",
+"dns-records": "cfdns",
+"dns-sweep": "dnsall",
+"domain-recon": "domaindeep",
+"find-subdomains": "ctsub",
+"header-grade": "httpsec",
+"hidden-paths": "sitemapenum",
+"investigate-domain": "domaindeep",
+"ip-owner": "asninfo",
+"list-dns": "cfdns",
+"lock-cookbook": "cookbook",
+"my-zones": "cfzones",
+"old-pages": "waybackurls",
+"operators": "cookbook",
+"purge-cache": "cfpurge",
+"recon": "domaindeep",
+"robots-sitemap": "sitemapenum",
+"security-headers": "httpsec",
+"spam-check": "reputation",
+"subdomain-finder": "ctsub",
+"takeover-check": "dangling",
+"unlock-cookbook": "cookbook",
+"analyze-email": "emailheaders",
+"analyze-url": "urlinfo",
+"blocklist-check": "reputation",
+"cert-stream": "certwatch",
+"cve-info": "cve",
+"detect-tech": "techfp",
+"dns-security": "dnssec",
+"email-security": "mailsec",
+"extract-iocs": "iocextract",
+"favicon-fingerprint": "faviconhash",
+"find-iocs": "iocextract",
+"ioc-lookup": "threatfox",
+"ip-whois": "rdapip",
+"is-this-link-safe": "urlinfo",
+"is-tor-exit": "torexit",
+"mail-setup": "mailsec",
+"scan-history": "urlscan",
+"site-scans": "urlscan",
+"standard-files": "wellknown",
+"threat-intel": "threatfox",
+"tor-check": "torexit",
+"trace-email": "emailheaders",
 "view-spreadsheet": "csvview",
 "voice-call": "vcoffer",
 "voice-to-text": "stt",
+"vuln-lookup": "cve",
 "watch": "mon",
+"watch-certs": "certwatch",
 "watch-friends": "watchdog",
+"well-known": "wellknown",
 "what-browser": "uaparse",
 "what-can-i-do": "help",
 "what-does-404-mean": "httpstatus",
 "what-is-my-ip": "myip",
 "what-schedule": "crondesc",
+"what-tech": "techfp",
 "where-am-i": "geolocate",
 "where-does-it-go": "redirtrace",
 "which-way": "devorient",
 "who-is-here": "presence",
 "who-made-it": "macvendor",
+"who-owns-ip": "asninfo",
+"who-owns-this-ip": "rdapip",
 "whoami": "myid",
 "whois": "rdap",
 "wifi-address": "localips",
 "wipe": "reset",
 "wisdom": "quote",
 "world-clock": "tzconv",
-"clear-cache": "cfpurge",
-"cloudflare-zones": "cfzones",
-"deep-dive": "domaindeep",
-"dns-records": "cfdns",
-"domain-recon": "domaindeep",
-"investigate-domain": "domaindeep",
-"list-dns": "cfdns",
-"lock-cookbook": "cookbook",
-"my-zones": "cfzones",
-"operators": "cookbook",
-"purge-cache": "cfpurge",
-"recon": "domaindeep",
-"unlock-cookbook": "cookbook",
 "zone-dns": "cfdns",
 "zones": "cfzones",
 };
 const PRIMARY_ALIAS = {
 "aesbench": "crypto-speed",
 "alias": "shortcut",
+"asninfo": "ip-owner",
 "attest": "device-card",
 "attest-send": "send-device-card",
 "attest-verify": "check-device-card",
@@ -555,6 +600,10 @@ const PRIMARY_ALIAS = {
 "candidates": "my-addresses",
 "caseconv": "change-case",
 "certinfo": "check-cert",
+"certwatch": "cert-stream",
+"cfdns": "dns-records",
+"cfpurge": "clear-cache",
+"cfzones": "cloudflare-zones",
 "clear": "cls",
 "clipread": "paste",
 "clipwrite": "copy",
@@ -563,6 +612,7 @@ const PRIMARY_ALIAS = {
 "colorpick": "grab-color",
 "config": "my-setup",
 "contrast": "is-readable",
+"cookbook": "lock-cookbook",
 "cookies": "site-cookies",
 "corscheck": "can-sites-read",
 "countdown": "timer",
@@ -570,7 +620,10 @@ const PRIMARY_ALIAS = {
 "csspx": "convert-px",
 "csv2json": "csv-to-json",
 "csvview": "view-spreadsheet",
+"ctsub": "subdomain-finder",
+"cve": "vuln-lookup",
 "dadjoke": "joke",
+"dangling": "takeover-check",
 "dclog": "link-log",
 "deviceinfo": "phone-info",
 "devices": "list-devices",
@@ -578,9 +631,13 @@ const PRIMARY_ALIAS = {
 "diceroll": "dice",
 "dispatch": "dm",
 "displayinfo": "screen-info",
+"dnsall": "dns-sweep",
+"dnssec": "dns-security",
 "doh": "dns-lookup",
 "dohcf": "cloudflare-dns",
+"domaindeep": "deep-dive",
 "eightball": "ask-ball",
+"emailheaders": "trace-email",
 "emojistrip": "remove-emoji",
 "entropy": "how-strong",
 "esign": "sign",
@@ -591,6 +648,7 @@ const PRIMARY_ALIAS = {
 "exportkey": "download-key",
 "exportlog": "backup-messages",
 "exportpeers": "backup-friends",
+"faviconhash": "favicon-fingerprint",
 "fetchping": "site-speed",
 "fileb64d": "text-to-file",
 "fileb64e": "file-to-text",
@@ -608,6 +666,7 @@ const PRIMARY_ALIAS = {
 "htmlesc": "escape-html",
 "httpget": "download-page",
 "httphead": "peek-site",
+"httpsec": "security-headers",
 "httpstatus": "status-meaning",
 "ice-restart": "fix-link",
 "idbkeys": "site-databases",
@@ -618,6 +677,7 @@ const PRIMARY_ALIAS = {
 "inbox": "messages",
 "inboxclear": "clear-messages",
 "inboxsearch": "find-message",
+"iocextract": "extract-iocs",
 "json2csv": "json-to-csv",
 "jsonfmt": "pretty-json",
 "jwtdecode": "decode-token",
@@ -626,6 +686,7 @@ const PRIMARY_ALIAS = {
 "lorem": "filler-text",
 "lskeys": "saved-data",
 "macvendor": "card-maker",
+"mailsec": "email-security",
 "mdpreview": "preview-markdown",
 "metronome": "beat-keeper",
 "mimetypes": "file-types",
@@ -662,12 +723,14 @@ const PRIMARY_ALIAS = {
 "quote": "wisdom",
 "rand": "random",
 "rdap": "domain-info",
+"rdapip": "ip-whois",
 "recsave": "save-recording",
 "recstart": "record-call",
 "recvlist": "received-files",
 "redirtrace": "follow-link",
 "regextest": "regex",
 "repeat": "repeat-text",
+"reputation": "blocklist-check",
 "reqbuilder": "custom-request",
 "reset": "factory-reset",
 "restimer": "site-timer",
@@ -692,6 +755,7 @@ const PRIMARY_ALIAS = {
 "sha512": "strong-fingerprint",
 "sigsend": "send-via-helper",
 "sigset": "helper-server",
+"sitemapenum": "hidden-paths",
 "slugify": "url-slug",
 "sortlines": "sort",
 "sos": "emergency-beacon",
@@ -702,13 +766,16 @@ const PRIMARY_ALIAS = {
 "storage": "free-space",
 "stt": "dictate",
 "subnet": "ip-math",
+"techfp": "what-tech",
 "textdiff": "compare-text",
 "textstats": "reading-level",
 "theme": "dark-mode",
+"threatfox": "threat-intel",
 "time": "clock",
 "tipcalc": "split-bill",
 "todo": "tasks",
 "tonegen": "play-tone",
+"torexit": "tor-check",
 "totp": "auth-code",
 "touchinfo": "is-touch",
 "trust": "add-friend",
@@ -721,7 +788,9 @@ const PRIMARY_ALIAS = {
 "untrust": "remove-friend",
 "urldecode": "decode-url",
 "urlencode": "encode-url",
+"urlinfo": "analyze-url",
 "urlparse": "split-url",
+"urlscan": "scan-history",
 "uuid": "new-uuid",
 "uuid7": "new-id",
 "vcaccept": "join-call",
@@ -732,15 +801,12 @@ const PRIMARY_ALIAS = {
 "videorec": "record-video",
 "wakelock": "keep-awake",
 "watchdog": "watch-friends",
+"waybackurls": "archived-urls",
+"wellknown": "well-known",
 "wordcount": "count-words",
 "words": "secret-words",
 "wrapdemo": "key-wrap",
 "wstest": "test-socket",
-"cfpurge": "clear-cache",
-"cfzones": "cloudflare-zones",
-"domaindeep": "deep-dive",
-"cfdns": "dns-records",
-"cookbook": "lock-cookbook",
 };
 
 const hist = []; let hi = 0;
@@ -1764,6 +1830,490 @@ cmd("domaindeep", "full recon on a domain: DNS, registration, certificates, head
   } catch (e) { out.push("header fetch failed (site may block cross-site reads): " + e.message); }
   println(out.join("\n"));
 });
+/* ---------- Operators Cookbook: deep enumeration & analysis (passive, no keys) ---------- */
+cmd("ctsub", "usage: ctsub <domain> — enumerate subdomains from Certificate Transparency logs", async (a) => {
+  const d = (a[0] || "").toLowerCase().replace(/^https?:\/\//, "").split("/")[0].trim();
+  if (!d || !d.includes(".")) throw new Error("usage: ctsub <domain>   e.g. ctsub example.com");
+  const r = await fetch("https://crt.sh/?q=%25." + encodeURIComponent(d) + "&output=json");
+  if (!r.ok) throw new Error("crt.sh failed: HTTP " + r.status);
+  const j = await r.json();
+  const subs = new Set();
+  for (const row of j) {
+    for (const n of String(row.name_value || "").split("\n")) {
+      const s = n.trim().toLowerCase().replace(/^\*\./, "");
+      if (s && (s === d || s.endsWith("." + d))) subs.add(s);
+    }
+  }
+  const list = [...subs].sort();
+  println(list.length + " unique subdomains for " + d + ":\n" + (list.join("\n") || "(none)"));
+});
+cmd("dnsall", "usage: dnsall <domain> — sweep every common DNS record type", async (a) => {
+  const d = (a[0] || "").toLowerCase().replace(/^https?:\/\//, "").split("/")[0].trim();
+  if (!d || !d.includes(".")) throw new Error("usage: dnsall <domain>   e.g. dnsall example.com");
+  const out = ["=== " + d + " ==="];
+  for (const t of ["A", "AAAA", "CNAME", "MX", "TXT", "NS", "SOA", "CAA", "SRV"]) {
+    try {
+      const r = await fetch("https://dns.google/resolve?name=" + encodeURIComponent(d) + "&type=" + t);
+      const j = await r.json();
+      const ans = (j.Answer || []).map((x) => x.data).join(" | ");
+      out.push(t.padEnd(6) + (ans || "(none)"));
+    } catch (e) { out.push(t.padEnd(6) + "lookup failed (" + e.message + ")"); }
+  }
+  println(out.join("\n"));
+});
+cmd("waybackurls", "usage: waybackurls <domain> — enumerate archived URLs from the Wayback Machine", async (a) => {
+  const d = (a[0] || "").toLowerCase().replace(/^https?:\/\//, "").split("/")[0].trim();
+  if (!d || !d.includes(".")) throw new Error("usage: waybackurls <domain>   e.g. waybackurls example.com");
+  const r = await fetch("https://web.archive.org/cdx/search/cdx?url=" + encodeURIComponent(d) + "/*&output=json&collapse=urlkey&limit=300&filter=statuscode:200");
+  if (!r.ok) throw new Error("Wayback CDX failed: HTTP " + r.status);
+  let j;
+  try { j = await r.json(); } catch (e) { throw new Error("Wayback CDX returned an unreadable response (rate-limited?) — try again shortly"); }
+  const urls = j.slice(1).map((row) => row[2]).filter(Boolean);
+  println(urls.length + " archived URLs for " + d + " (up to 300):\n" + (urls.join("\n") || "(none)"));
+});
+cmd("sitemapenum", "usage: sitemapenum <domain> — discover hidden paths via robots.txt + sitemaps", async (a) => {
+  let d = (a[0] || "").toLowerCase().trim();
+  if (!d) throw new Error("usage: sitemapenum <domain>   e.g. sitemapenum example.com");
+  if (!/^https?:\/\//i.test(d)) d = "https://" + d;
+  d = d.replace(/\/+$/, "");
+  const out = [];
+  try {
+    const r = await fetch(d + "/robots.txt");
+    if (!r.ok) { out.push("robots.txt: HTTP " + r.status); }
+    else {
+      const t = await r.text();
+      const dis = [...t.matchAll(/^\s*disallow:\s*(\S+)/gim)].map((m) => m[1]);
+      out.push("robots.txt (" + t.length + " bytes)" + (dis.length ? "\ndisallowed paths:\n" + dis.slice(0, 50).join("\n") : "\n(no Disallow lines)"));
+      const sms = [...t.matchAll(/^\s*sitemap:\s*(\S+)/gim)].map((m) => m[1]).slice(0, 2);
+      for (const u of sms) {
+        try {
+          const sr = await fetch(u);
+          if (!sr.ok) { out.push("sitemap " + u + ": HTTP " + sr.status); continue; }
+          const st = await sr.text();
+          const locs = [...st.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1]);
+          out.push("sitemap " + u + " (" + locs.length + " urls):\n" + locs.slice(0, 100).join("\n"));
+        } catch (e) { out.push("sitemap " + u + ": fetch failed (" + e.message + ")"); }
+      }
+      if (!sms.length) out.push("(no Sitemap lines in robots.txt)");
+    }
+  } catch (e) { out.push("robots.txt: fetch failed — site may block cross-site reads (" + e.message + ")"); }
+  println(out.join("\n\n"));
+});
+cmd("httpsec", "usage: httpsec <url> — audit a site's HTTP security headers, graded A to F", async (a) => {
+  let u = (a[0] || "").trim();
+  if (!u) throw new Error("usage: httpsec <url>   e.g. httpsec example.com");
+  if (!/^https?:\/\//i.test(u)) u = "https://" + u;
+  let r;
+  try { r = await fetch(u, { method: "HEAD", redirect: "follow" }); }
+  catch (e) { throw new Error("unreachable or blocked by CORS (" + e.message + ")"); }
+  const H = {};
+  r.headers.forEach((v, k) => { H[k.toLowerCase()] = v; });
+  const checks = [
+    ["strict-transport-security", "HSTS", (v) => /max-age=\d+/.test(v)],
+    ["content-security-policy", "CSP", () => true],
+    ["x-frame-options", "X-Frame-Options", (v) => /deny|sameorigin/i.test(v)],
+    ["x-content-type-options", "X-Content-Type-Options", (v) => /nosniff/i.test(v)],
+    ["referrer-policy", "Referrer-Policy", () => true],
+    ["permissions-policy", "Permissions-Policy", () => true]
+  ];
+  let score = 0;
+  const lines = [];
+  for (const [h, label, ok] of checks) {
+    if (H[h] && ok(H[h])) { score++; lines.push("PASS  " + label + ": " + H[h].slice(0, 100)); }
+    else if (H[h]) lines.push("WEAK  " + label + ": " + H[h].slice(0, 100));
+    else lines.push("MISS  " + label + ": not set");
+  }
+  const grade = score >= 5 ? "A" : score >= 4 ? "B" : score >= 3 ? "C" : score >= 2 ? "D" : "F";
+  let extra = "";
+  if (H["server"]) extra += "\nserver: " + H["server"];
+  if (H["x-powered-by"]) extra += "\nx-powered-by: " + H["x-powered-by"];
+  println(u + " -> HTTP " + r.status + "   grade " + grade + " (" + score + "/" + checks.length + ")\n" + lines.join("\n") + extra);
+});
+cmd("techfp", "usage: techfp <url> — fingerprint what stack a website is built on", async (a) => {
+  let u = (a[0] || "").trim();
+  if (!u) throw new Error("usage: techfp <url>   e.g. techfp example.com");
+  if (!/^https?:\/\//i.test(u)) u = "https://" + u;
+  let r;
+  try { r = await fetch(u, { redirect: "follow" }); }
+  catch (e) { throw new Error("unreachable or blocked by CORS (" + e.message + ")"); }
+  const sigs = [];
+  const srv = r.headers.get("server"), pb = r.headers.get("x-powered-by");
+  if (srv) sigs.push("server header: " + srv);
+  if (pb) sigs.push("powered-by header: " + pb);
+  const html = (await r.text()).slice(0, 200000);
+  const pats = [
+    [/wp-content|wp-includes/i, "WordPress"],
+    [/<meta[^>]+name=["']generator["'][^>]+content=["']([^"']+)/i, null],
+    [/__NEXT_DATA__|_next\/static/i, "Next.js"],
+    [/nuxt|_nuxt\//i, "Nuxt.js"],
+    [/data-reactroot|react-dom/i, "React"],
+    [/ng-version/i, "Angular"],
+    [/vue(\.min)?\.js|__vue__/i, "Vue.js"],
+    [/drupal/i, "Drupal"],
+    [/joomla/i, "Joomla"],
+    [/cdn\.shopify\.com|myshopify/i, "Shopify"],
+    [/wix\.com/i, "Wix"],
+    [/squarespace/i, "Squarespace"],
+    [/cloudflare/i, "Cloudflare (in page or headers)"]
+  ];
+  for (const [re, label] of pats) {
+    const m = html.match(re);
+    if (m) sigs.push(label === null ? "generator meta: " + m[1] : label);
+  }
+  println(u + " fingerprints:\n" + ([...new Set(sigs)].join("\n") || "(nothing obvious — clean or custom stack)"));
+});
+cmd("dangling", "usage: dangling <domain> — find dangling CNAMEs attackers could claim", async (a) => {
+  const d = (a[0] || "").toLowerCase().replace(/^https?:\/\//, "").split("/")[0].trim();
+  if (!d || !d.includes(".")) throw new Error("usage: dangling <domain>   e.g. dangling example.com");
+  println("enumerating subdomains via crt.sh, then checking CNAMEs — this takes a bit...");
+  const cr = await fetch("https://crt.sh/?q=%25." + encodeURIComponent(d) + "&output=json");
+  if (!cr.ok) throw new Error("crt.sh failed: HTTP " + cr.status);
+  const cj = await cr.json();
+  const subs = new Set();
+  for (const row of cj) {
+    for (const n of String(row.name_value || "").split("\n")) {
+      const s = n.trim().toLowerCase().replace(/^\*\./, "");
+      if (s && (s === d || s.endsWith("." + d))) subs.add(s);
+    }
+  }
+  const list = [...subs].slice(0, 60);
+  const hits = [], checked = { n: 0 };
+  for (const s of list) {
+    try {
+      const r = await fetch("https://dns.google/resolve?name=" + encodeURIComponent(s) + "&type=CNAME");
+      const j = await r.json();
+      const cn = (j.Answer || []).map((x) => x.data.replace(/\.$/, ""));
+      for (const t of cn) {
+        checked.n++;
+        try {
+          const ar = await fetch("https://dns.google/resolve?name=" + encodeURIComponent(t) + "&type=A");
+          const aj = await ar.json();
+          if (aj.Status === 3) hits.push("DANGLING  " + s + " -> " + t + "  (target does not resolve — claimable?)");
+        } catch (e) { /* ignore */ }
+      }
+    } catch (e) { /* ignore */ }
+  }
+  println("checked " + list.length + " subdomains (" + checked.n + " CNAMEs)\n" +
+    (hits.length ? hits.join("\n") : "no dangling CNAMEs found in the checked set"));
+});
+cmd("asninfo", "usage: asninfo <ip-or-domain> — which network/ASN is behind an address", async (a) => {
+  let t = (a[0] || "").trim();
+  if (!t) throw new Error("usage: asninfo <ip-or-domain>   e.g. asninfo 8.8.8.8");
+  let ip = t;
+  if (!/^\d+\.\d+\.\d+\.\d+$/.test(t)) {
+    const dr = await fetch("https://dns.google/resolve?name=" + encodeURIComponent(t.replace(/^https?:\/\//, "").split("/")[0]) + "&type=A");
+    const dj = await dr.json();
+    ip = ((dj.Answer || [])[0] || {}).data;
+    if (!ip) throw new Error("could not resolve " + t);
+  }
+  const r = await fetch("https://stat.ripe.net/data/prefix-overview/data.json?resource=" + encodeURIComponent(ip));
+  if (!r.ok) throw new Error("RIPEstat failed: HTTP " + r.status);
+  const j = await r.json();
+  const dd = j.data || {};
+  const asns = (dd.asns || []).map((x) => "AS" + x.asn + " (" + (x.holder || "?") + ")").join(", ");
+  println(ip + "\nannounced: " + dd.announced + "\nASNs: " + (asns || "?") + "\nprefix: " + ((dd.resource || "") ));
+});
+cmd("reputation", "usage: reputation <ip-or-domain> — is this address on the Spamhaus blocklist", async (a) => {
+  let t = (a[0] || "").trim();
+  if (!t) throw new Error("usage: reputation <ip-or-domain>   e.g. reputation 1.2.3.4");
+  let ip = t;
+  if (!/^\d+\.\d+\.\d+\.\d+$/.test(t)) {
+    const dr = await fetch("https://dns.google/resolve?name=" + encodeURIComponent(t.replace(/^https?:\/\//, "").split("/")[0]) + "&type=A");
+    const dj = await dr.json();
+    ip = ((dj.Answer || [])[0] || {}).data;
+    if (!ip) throw new Error("could not resolve " + t);
+  }
+  const rev = ip.split(".").reverse().join(".");
+  let j;
+  try {
+    const r = await fetch("https://dns.google/resolve?name=" + rev + ".zen.spamhaus.org&type=A");
+    j = await r.json();
+  } catch (e) { throw new Error("DNSBL query failed (" + e.message + ") — Spamhaus often rate-limits public resolvers"); }
+  const hits = (j.Answer || []).map((x) => x.data);
+  println(ip + (hits.length
+    ? "\nLISTED on Spamhaus ZEN:\n" + hits.join("\n") + "\n(return codes: 127.0.0.2/3 = spam, .4/.5/.6/.7 = exploits/policy — see spamhaus.org/zen)"
+    : "\nnot listed on Spamhaus ZEN (clean)"));
+});
+/* ---------- Operators Cookbook round 2: threat intel, live streams, local forensics ---------- */
+cmd("urlscan", "usage: urlscan <domain> — past security scans of a domain (urlscan.io)", async (a) => {
+  const d = (a[0] || "").toLowerCase().replace(/^https?:\/\//, "").split("/")[0].trim();
+  if (!d || !d.includes(".")) throw new Error("usage: urlscan <domain>   e.g. urlscan example.com");
+  const r = await fetch("https://urlscan.io/api/v1/search/?q=domain%3A" + encodeURIComponent(d) + "&size=15");
+  if (!r.ok) throw new Error("urlscan.io failed: HTTP " + r.status);
+  const j = await r.json();
+  const res = j.results || [];
+  if (!res.length) { println("no urlscan.io results for " + d); return; }
+  println(res.length + " recent scans for " + d + ":\n" + res.map((x) => {
+    const v = (x.verdicts && x.verdicts.overall) || {};
+    return (x.task.time || "?").slice(0, 10) + "  " + (x.page.url || "?").slice(0, 70) +
+      "  ip:" + ((x.page || {}).ip || "?") + "  malicious:" + (v.malicious ? "YES(" + v.score + ")" : "no");
+  }).join("\n"));
+});
+cmd("threatfox", "usage: threatfox <domain-or-ip> — is this indicator known-bad? (abuse.ch)", async (a) => {
+  const t = (a[0] || "").trim().replace(/^https?:\/\//, "").split("/")[0];
+  if (!t) throw new Error("usage: threatfox <domain-or-ip>   e.g. threatfox evil.example");
+  let j;
+  try {
+    const r = await fetch("https://threatfox-api.abuse.ch/api/v1/", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: "search_ioc", search_term: t })
+    });
+    j = await r.json();
+  } catch (e) { throw new Error("ThreatFox query failed (" + e.message + ")"); }
+  if (j.error) throw new Error("ThreatFox: " + j.error + " — abuse.ch now requires a free API key for this endpoint");
+  if (j.query_status === "no_result" || !(j.data || []).length) { println(t + ": not in ThreatFox (no known-bad record)"); return; }
+  if (j.query_status !== "ok") throw new Error("ThreatFox: unexpected status '" + j.query_status + "'");
+  println(t + ": " + j.data.length + " ThreatFox record(s)\n" + j.data.slice(0, 10).map((x) =>
+    (x.ioc_type || "?") + " " + (x.ioc || "?") + "\n  threat: " + (x.threat_type || "?") +
+    "  malware: " + (x.malware_printable || x.malware || "?") +
+    "  confidence: " + (x.confidence_level || "?") + "  first seen: " + (x.first_seen || "?")).join("\n"));
+});
+cmd("cve", "usage: cve <CVE-ID> — vulnerability details from the NVD", async (a) => {
+  const id = (a[0] || "").toUpperCase().trim();
+  if (!/^CVE-\d{4}-\d{4,}$/.test(id)) throw new Error("usage: cve <CVE-ID>   e.g. cve CVE-2024-12345");
+  const r = await fetch("https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=" + encodeURIComponent(id));
+  if (!r.ok) throw new Error("NVD failed: HTTP " + r.status);
+  const j = await r.json();
+  const v = (j.vulnerabilities || [])[0];
+  if (!v) { println(id + ": not found in the NVD"); return; }
+  const c = v.cve;
+  const desc = ((c.descriptions || []).find((x) => x.lang === "en") || {}).value || "?";
+  let sev = "?";
+  const m31 = (c.metrics || {}).cvssMetricV31 || (c.metrics || {}).cvssMetricV30 || [];
+  if (m31[0]) sev = m31[0].cvssData.baseScore + " " + (m31[0].cvssData.baseSeverity || "");
+  println(id + "\nseverity: " + sev + "\npublished: " + (c.published || "?").slice(0, 10) +
+    "\nstatus: " + (c.vulnStatus || "?") + "\n" + desc.slice(0, 600));
+});
+let CERTWS = null, CERTSEEN = 0;
+cmd("certwatch", "usage: certwatch <keyword> | certwatch stop — live Certificate Transparency stream", async (a) => {
+  const sub = (a[0] || "").toLowerCase();
+  if (sub === "stop" || sub === "off") {
+    if (CERTWS) { CERTWS.close(); CERTWS = null; println("cert stream stopped (" + CERTSEEN + " matches shown)"); }
+    else println("no cert stream running");
+    return;
+  }
+  const kw = (a[0] || "").toLowerCase().trim();
+  if (!kw) throw new Error("usage: certwatch <keyword>   e.g. certwatch paypal   — then 'certwatch stop'");
+  if (CERTWS) { CERTWS.close(); CERTWS = null; }
+  CERTSEEN = 0;
+  println("watching live certificates for '" + kw + "' — 'certwatch stop' to end");
+  const ws = new WebSocket("wss://certstream.calidog.io/");
+  CERTWS = ws;
+  ws.onmessage = (ev) => {
+    try {
+      const m = JSON.parse(ev.data);
+      if (m.message_type !== "certificate_update") return;
+      const doms = (m.data.leaf_cert.all_domains || []).filter((x) => x.toLowerCase().includes(kw));
+      if (doms.length && CERTWS === ws) {
+        CERTSEEN++;
+        println("[" + new Date().toISOString().slice(11, 19) + "] " + doms.slice(0, 6).join(", ") +
+          "   issuer: " + (((m.data.chain || [])[0] || {}).subject || {}).CN || "?");
+      }
+    } catch (e) { /* ignore malformed frames */ }
+  };
+  ws.onerror = () => { if (CERTWS === ws) println("cert stream error — the feed may be down, try again later"); };
+  ws.onclose = () => { if (CERTWS === ws) { CERTWS = null; println("cert stream closed"); } };
+});
+cmd("torexit", "usage: torexit <ip> — is this address a Tor exit node?", async (a) => {
+  const ip = (a[0] || "").trim();
+  if (!/^\d+\.\d+\.\d+\.\d+$/.test(ip)) throw new Error("usage: torexit <ip>   e.g. torexit 1.2.3.4");
+  const r = await fetch("https://www.dan.me.uk/torlist/?exit");
+  if (!r.ok) throw new Error("torlist fetch failed: HTTP " + r.status);
+  const list = (await r.text()).split("\n").map((x) => x.trim());
+  println(ip + (list.includes(ip) ? " IS a current Tor exit node" : " is not on the current Tor exit list"));
+});
+cmd("wellknown", "usage: wellknown <domain> — enumerate standard discovery files", async (a) => {
+  let d = (a[0] || "").toLowerCase().trim();
+  if (!d) throw new Error("usage: wellknown <domain>   e.g. wellknown example.com");
+  if (!/^https?:\/\//i.test(d)) d = "https://" + d;
+  d = d.replace(/\/+$/, "");
+  const paths = ["/.well-known/security.txt", "/.well-known/change-password", "/robots.txt", "/sitemap.xml",
+    "/humans.txt", "/ads.txt", "/.well-known/assetlinks.json", "/.well-known/apple-app-site-association"];
+  const out = [];
+  for (const p of paths) {
+    try {
+      const r = await fetch(d + p, { redirect: "follow" });
+      let note = "HTTP " + r.status;
+      if (r.ok) {
+        const t = await r.text();
+        note += "  " + t.length + " bytes";
+        if (p.endsWith("security.txt")) {
+          const contact = (t.match(/^Contact:\s*(.+)$/gim) || []).slice(0, 3).join(" | ");
+          if (contact) note += "  (" + contact.slice(0, 90) + ")";
+        }
+      }
+      out.push(p.padEnd(44) + note);
+    } catch (e) { out.push(p.padEnd(44) + "unreachable/CORS"); }
+  }
+  println(out.join("\n"));
+});
+cmd("mailsec", "usage: mailsec <domain> — SPF, DMARC, DKIM and BIMI in one check", async (a) => {
+  const d = (a[0] || "").toLowerCase().replace(/^https?:\/\//, "").split("/")[0].trim();
+  if (!d || !d.includes(".")) throw new Error("usage: mailsec <domain>   e.g. mailsec example.com");
+  const dq = async (name, type) => {
+    try {
+      const r = await fetch("https://dns.google/resolve?name=" + encodeURIComponent(name) + "&type=" + (type || "TXT"));
+      const j = await r.json();
+      return (j.Answer || []).map((x) => x.data.replace(/^"|"$/g, "")).join(" ");
+    } catch (e) { return ""; }
+  };
+  const out = ["=== mail security: " + d + " ==="];
+  const mx = await dq(d, "MX");
+  out.push("MX: " + (mx || "(none — cannot receive mail)"));
+  const spf = await dq(d, "TXT");
+  const spfm = spf.match(/v=spf1[^"]*/);
+  out.push("SPF: " + (spfm ? spfm[0].slice(0, 120) : "MISSING"));
+  const dmarc = await dq("_dmarc." + d, "TXT");
+  const dmm = dmarc.match(/v=DMARC1[^"]*/);
+  out.push("DMARC: " + (dmm ? dmm[0].slice(0, 120) : "MISSING"));
+  const sels = ["default", "selector1", "selector2", "google", "k1", "mail", "dkim", "s1", "s2"];
+  const found = [];
+  for (const s of sels) { const t = await dq(s + "._domainkey." + d, "TXT"); if (/v=DKIM1/.test(t)) found.push(s); }
+  out.push("DKIM selectors found: " + (found.join(", ") || "(none of the common ones)"));
+  const bimi = await dq("default._bimi." + d, "TXT");
+  out.push("BIMI: " + (/v=BIMI1/.test(bimi) ? "present" : "not set"));
+  const grade = (spfm ? 1 : 0) + (dmm ? 1 : 0) + (found.length ? 1 : 0);
+  out.push("posture: " + ["none", "weak", "partial", "solid"][grade] + " (" + grade + "/3)");
+  println(out.join("\n"));
+});
+cmd("dnssec", "usage: dnssec <domain> — is this domain DNSSEC-signed?", async (a) => {
+  const d = (a[0] || "").toLowerCase().replace(/^https?:\/\//, "").split("/")[0].trim();
+  if (!d || !d.includes(".")) throw new Error("usage: dnssec <domain>   e.g. dnssec example.com");
+  const dq = async (name, type) => {
+    const r = await fetch("https://dns.google/resolve?name=" + encodeURIComponent(name) + "&type=" + type);
+    return r.json();
+  };
+  const out = ["=== DNSSEC: " + d + " ==="];
+  try {
+    const ds = await dq(d, "DS");
+    const hasDS = (ds.Answer || []).length > 0;
+    out.push("DS (parent delegation): " + (hasDS ? "present — chain of trust starts" : "absent"));
+    const key = await dq(d, "DNSKEY");
+    const keys = (key.Answer || []).map((x) => x.data);
+    out.push("DNSKEY: " + (keys.length ? keys.length + " key(s) published" : "none published"));
+    if (hasDS && keys.length) out.push("verdict: SIGNED (DS + DNSKEY both present)");
+    else if (!hasDS && !keys.length) out.push("verdict: UNSIGNED");
+    else out.push("verdict: BROKEN/partial — DS and DNSKEY disagree, validation will fail");
+  } catch (e) { out.push("lookup failed: " + e.message); }
+  println(out.join("\n"));
+});
+cmd("rdapip", "usage: rdapip <ip> — who owns this IP block?", async (a) => {
+  const ip = (a[0] || "").trim();
+  if (!/^\d+\.\d+\.\d+\.\d+$/.test(ip)) throw new Error("usage: rdapip <ip>   e.g. rdapip 8.8.8.8");
+  const r = await fetch("https://rdap.org/ip/" + encodeURIComponent(ip));
+  if (!r.ok) throw new Error("RDAP failed: HTTP " + r.status);
+  const j = await r.json();
+  const ent = (j.entities || []).map((e) => ((e.vcardArray || [])[1] || []).find((v) => v[0] === "fn") || []);
+  println("range: " + (j.handle || "?") + "\nname: " + (j.name || "?") + "\ncountry: " + (j.country || "?") +
+    "\nstatus: " + ((j.status || []).join(", ") || "?") +
+    "\norg: " + (ent[0] && ent[0][3] ? ent[0][3] : "?"));
+});
+function murmur3_32(bytes, seed) {
+  seed = seed >>> 0;
+  const c1 = 0xcc9e2d51, c2 = 0x1b873593;
+  let h1 = seed;
+  const len = bytes.length, nblocks = Math.floor(len / 4);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (let i = 0; i < nblocks; i++) {
+    let k1 = view.getUint32(i * 4, true);
+    k1 = Math.imul(k1, c1); k1 = (k1 << 15) | (k1 >>> 17); k1 = Math.imul(k1, c2);
+    h1 ^= k1; h1 = (h1 << 13) | (h1 >>> 19); h1 = Math.imul(h1, 5) + 0xe6546b64;
+  }
+  let k1 = 0;
+  const t = nblocks * 4;
+  switch (len & 3) {
+    case 3: k1 ^= bytes[t + 2] << 16;
+    case 2: k1 ^= bytes[t + 1] << 8;
+    case 1: k1 ^= bytes[t]; k1 = Math.imul(k1, c1); k1 = (k1 << 15) | (k1 >>> 17); k1 = Math.imul(k1, c2); h1 ^= k1;
+  }
+  h1 ^= len;
+  h1 ^= h1 >>> 16; h1 = Math.imul(h1, 0x85ebca6b); h1 ^= h1 >>> 13;
+  h1 = Math.imul(h1, 0xc2b2ae35); h1 ^= h1 >>> 16;
+  return h1 | 0;
+}
+cmd("faviconhash", "usage: faviconhash <url> — Shodan-style favicon hash for pivoting", async (a) => {
+  let u = (a[0] || "").trim();
+  if (!u) throw new Error("usage: faviconhash <url>   e.g. faviconhash example.com");
+  if (!/^https?:\/\//i.test(u)) u = "https://" + u;
+  u = u.replace(/\/+$/, "");
+  let buf;
+  for (const p of ["/favicon.ico", "/apple-touch-icon.png"]) {
+    try {
+      const r = await fetch(u + p);
+      if (r.ok) { buf = await r.arrayBuffer(); break; }
+    } catch (e) { /* try next */ }
+  }
+  if (!buf) throw new Error("no favicon found (or blocked by CORS)");
+  const h = murmur3_32(new Uint8Array(buf), 0);
+  println("murmur3_32: " + h + "\npivot on Shodan with:  http.favicon.hash:" + h);
+});
+cmd("iocextract", "usage: iocextract [defang] — pull indicators from copied text", async (a) => {
+  let t;
+  try { t = await navigator.clipboard.readText(); } catch (e) { throw new Error("clipboard denied — click the page first, then retry"); }
+  if (!t) throw new Error("clipboard is empty — copy some text first");
+  const defang = (a[0] || "").toLowerCase() === "defang";
+  const grab = (re) => [...new Set([...t.matchAll(re)].map((m) => m[0]))];
+  const ips = grab(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g).filter((x) => x.split(".").every((n) => +n < 256));
+  const urls = grab(/https?:\/\/[^\s"'<>]+/gi);
+  const emails = grab(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g);
+  const hashes = grab(/\b(?:[0-9a-f]{32}|[0-9a-f]{40}|[0-9a-f]{64})\b/gi);
+  const doms = grab(/\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}\b/gi)
+    .filter((x) => !emails.some((e) => e.includes(x)) && !urls.some((u) => u.includes(x)));
+  const df = (x) => defang ? x.replace(/\./g, "[.]").replace(/^http/, "hxxp") : x;
+  const sec = (label, arr) => label + " (" + arr.length + ")" + (arr.length ? "\n" + arr.slice(0, 50).map(df).join("\n") : "");
+  println([sec("IPs", ips), sec("URLs", urls), sec("domains", doms), sec("emails", emails), sec("hashes", hashes)].join("\n\n"));
+});
+cmd("urlinfo", "usage: urlinfo <url> — deep link anatomy with phishing flags", async (a) => {
+  const raw = (a[0] || "").trim();
+  if (!raw) throw new Error("usage: urlinfo <url>");
+  let u;
+  try { u = new URL(/^https?:\/\//i.test(raw) ? raw : "https://" + raw); } catch (e) { throw new Error("not a parseable URL"); }
+  const flags = [];
+  if (/xn--/.test(u.hostname)) flags.push("PUNYCODE — internationalized domain, classic homograph trick");
+  if (u.username || raw.includes("@") && !u.hostname.includes("@")) flags.push("'@' trick — everything before @ is fake authority");
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(u.hostname)) flags.push("bare IP host — no domain name at all");
+  if (u.port && !["80", "443", ""].includes(u.port)) flags.push("odd port: " + u.port);
+  const depth = u.hostname.split(".").length;
+  if (depth > 4) flags.push("deep subdomain nesting (" + depth + " labels) — bury-the-brand trick");
+  const tld = u.hostname.split(".").pop();
+  if (["zip", "mov", "click", "xyz", "top", "gq", "cf", "tk", "ml", "buzz", "sbs"].includes(tld)) flags.push("high-abuse TLD: ." + tld);
+  if (raw.length > 200) flags.push("very long URL (" + raw.length + " chars) — hides the real destination");
+  if (/login|verify|secure|account|update|bank|paypal/i.test(u.hostname) && !/paypal\.com$|bankofamerica\.com$/.test(u.hostname))
+    flags.push("sensitive keyword in a non-official domain");
+  const lines = ["host: " + u.hostname, "path: " + (u.pathname || "/") + (u.search ? "  query: " + u.search.slice(0, 80) : ""),
+    "protocol: " + u.protocol, "port: " + (u.port || "(default)")];
+  lines.push(flags.length ? "PHISHING FLAGS (" + flags.length + "):\n- " + flags.join("\n- ") : "no classic phishing flags found (still verify the sender)");
+  println(lines.join("\n"));
+});
+cmd("emailheaders", "usage: emailheaders — trace a message's path from copied headers", async (a) => {
+  let t;
+  try { t = await navigator.clipboard.readText(); } catch (e) { throw new Error("clipboard denied — click the page first, then retry"); }
+  if (!/received:/i.test(t)) throw new Error("no Received: headers found — copy the full raw headers first");
+  const unfolded = t.replace(/\r?\n[ \t]+/g, " ");
+  const recvd = [...unfolded.matchAll(/^received:\s*(.+)$/gim)].map((m) => m[1]);
+  const hops = recvd.reverse().map((r, i) => {
+    const from = (r.match(/from\s+([^\s;]+)/i) || [])[1] || "?";
+    const by = (r.match(/by\s+([^\s;]+)/i) || [])[1] || "?";
+    const ip = (r.match(/\[(\d+\.\d+\.\d+\.\d+)\]/) || [])[1] || "";
+    const date = (r.match(/;\s*(.+)$/) || [])[1] || "";
+    return (i + 1) + ". " + from + " -> " + by + (ip ? " [" + ip + "]" : "") + (date ? "  " + date.slice(0, 31) : "");
+  });
+  const auth = (unfolded.match(/^authentication-results:\s*(.+)$/gim) || []).join(" ");
+  const ar = ["spf", "dkim", "dmarc"].map((k) => {
+    const m = auth.match(new RegExp(k + "\\s*=\\s*(\\w+)", "i"));
+    return k + "=" + (m ? m[1] : "?");
+  });
+  const from = (unfolded.match(/^from:\s*(.+)$/gim) || []).map((m) => m[1]).join(" | ").slice(0, 120);
+  const rp = (unfolded.match(/^return-path:\s*(.+)$/gim) || []).map((m) => m[1]).join(" ").slice(0, 120);
+  const rt = (unfolded.match(/^reply-to:\s*(.+)$/gim) || []).map((m) => m[1]).join(" ").slice(0, 120);
+  const flags = [];
+  if (rp && from && !from.toLowerCase().includes(rp.replace(/[<>\s]/g, "").toLowerCase().split("@")[0] || "~~~"))
+    flags.push("Return-Path differs from From — possible spoofing");
+  if (rt && from && rt !== from) flags.push("Reply-To differs from From — replies go elsewhere");
+  println("from: " + (from || "?") + "\nreturn-path: " + (rp || "?") + "\nauth: " + ar.join("  ") +
+    "\n\npath (" + hops.length + " hops, sender first):\n" + hops.join("\n") +
+    (flags.length ? "\n\nflags:\n- " + flags.join("\n- ") : "\n\nno header-spoof flags"));
+});
 function cfToken() {
   const t = cfgGet("cftoken");
   if (!t) throw new Error("no Cloudflare token saved — run: config set cftoken <token>\nCreate one at dash.cloudflare.com/profile/api-tokens (Zone:Read at minimum; DNS:Edit to change records)");
@@ -1981,12 +2531,28 @@ cmd("everify", "check a signed message is real and untouched", async (a) => {
   const ok = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, pub, b64d(a[1]), utf8(a.slice(2).join(" ")));
   print(ok ? '<span class="acc">signature VALID</span>' : '<span class="err">signature INVALID</span>');
 });
-cmd("jwtdecode", "peek inside a login token to see what it contains", async (a) => {
-  if (!a[0]) throw new Error("usage: jwtdecode <token>");
-  const p = a[0].split(".");
+cmd("jwtdecode", "peek inside a login token + flag security issues (reads clipboard if empty)", async (a) => {
+  let tok = (a[0] || "").trim();
+  if (!tok) {
+    try { tok = (await navigator.clipboard.readText()).trim(); }
+    catch (e) { throw new Error("usage: jwtdecode <token> — or copy a token first"); }
+  }
+  const p = tok.split(".");
   if (p.length !== 3) throw new Error("not a JWT (need 3 dot-separated parts)");
   const td = new TextDecoder();
-  println("header: " + td.decode(b64urlDecode(p[0])) + "\nbody: " + JSON.stringify(JSON.parse(td.decode(b64urlDecode(p[1]))), null, 2) + "\n(note: this shows contents only — it does NOT check the signature)");
+  let hd, bd;
+  try { hd = JSON.parse(td.decode(b64urlDecode(p[0]))); bd = JSON.parse(td.decode(b64urlDecode(p[1]))); }
+  catch (e) { throw new Error("JWT body is not valid JSON"); }
+  const flags = [];
+  if (String(hd.alg).toLowerCase() === "none") flags.push("CRITICAL: alg=none — signature not enforced");
+  if (bd.exp) {
+    const left = bd.exp - Math.floor(Date.now() / 1000);
+    if (left < 0) flags.push("EXPIRED " + Math.abs(Math.floor(left / 3600)) + "h ago");
+    else { flags.push("expires in " + Math.floor(left / 3600) + "h"); if (left > 86400) flags.push("long-lived token (>24h)"); }
+  } else flags.push("no exp claim — never expires");
+  println("header: " + JSON.stringify(hd) + "\nbody: " + JSON.stringify(bd, null, 2).slice(0, 800) +
+    "\n(note: contents only — signature NOT verified)" +
+    (flags.length ? "\nflags:\n- " + flags.join("\n- ") : "\nno issues spotted"));
 });
 cmd("lock", "lock text with a password so only the password opens it", async (a, line) => {
   const sp = line.indexOf(" ");
@@ -3305,7 +3871,29 @@ const DASH = [
  ["domaindeep","\U0001F50D","Deep domain recon","DNS, registration, certificates and headers, one report","fill"],
  ["cfzones","\u2601\uFE0F","My Cloudflare zones","List every zone on your Cloudflare token","run"],
  ["cfdns","\U0001F4DD","Zone DNS records","List a zone's DNS records, filter by type or name","fill"],
- ["cfpurge","\U0001F525","Purge zone cache","Clear Cloudflare's cache for a zone (asks for yes)","fill"]
+ ["cfpurge","\U0001F525","Purge zone cache","Clear Cloudflare's cache for a zone (asks for yes)","fill"],
+ ["ctsub","\u0001F50E","Subdomain finder","Every subdomain in Certificate Transparency logs","fill"],
+ ["dnsall","\u0001F4E1","DNS sweep","All record types: A, MX, TXT, NS, SOA, CAA","fill"],
+ ["waybackurls","\u0001F4DA","Archived URLs","Every page the Wayback Machine saved","fill"],
+ ["sitemapenum","\u0001F5FA\uFE0F","Hidden paths","robots.txt + sitemap discovery","fill"],
+ ["httpsec","\u0001F6E1\uFE0F","Security headers","Grade a site\u2019s HTTP defenses A to F","fill"],
+ ["techfp","\u0001F9EC","Tech fingerprint","What stack a website is built on","fill"],
+ ["dangling","\u26A0\uFE0F","Takeover check","Dangling CNAMEs attackers could claim","fill"],
+ ["asninfo","\u0001F30D","IP owner","The network and ASN behind an address","fill"],
+ ["reputation","\u0001F6AB","Blocklist check","Is this IP on Spamhaus?","fill"],
+ ["urlscan","\u0001F4F7","Scan history","Past security scans of this domain","fill"],
+ ["threatfox","\u2623\uFE0F","Threat intel","Is this indicator known-bad?","fill"],
+ ["cve","\u0001F41B","Vuln lookup","CVE details from the NVD","fill"],
+ ["certwatch","\u0001F52D","Cert stream","Watch new certificates live","fill"],
+ ["torexit","\u0001F9C5","Tor exit check","Is this IP a Tor exit?","fill"],
+ ["wellknown","\u0001F4C1","Well-known files","security.txt, humans.txt and friends","fill"],
+ ["mailsec","\u2709\uFE0F","Email security","SPF, DMARC, DKIM in one check","fill"],
+ ["dnssec","\u0001F50F","DNS security","Is this domain DNSSEC-signed?","fill"],
+ ["rdapip","\u0001F3E2","IP whois","Who owns this IP block?","fill"],
+ ["faviconhash","\u0001F3A8","Favicon fingerprint","Shodan-style site icon hash","fill"],
+ ["iocextract","\u0001F9F2","Extract IOCs","Pull indicators from copied text","fill"],
+ ["urlinfo","\u0001F517","Analyze URL","Phishing flags in a link","fill"],
+ ["emailheaders","\u0001F4E8","Trace email","Follow a message\u2019s Received path","fill"]
 ]],
 ["\u0001F4DD Words & files", [
  ["wordcount","\u0001F522","Count words","Words, characters, lines","fill"],
@@ -3421,7 +4009,7 @@ const DASH = [
 ]]
 ];
 /* gated: Operators Cookbook commands need the master key (this tab) */
-const COOKBOOK = new Set(['aesbench', 'cfdns', 'cfpurge', 'cfzones', 'clipread', 'cookbook', 'doh', 'domaindeep', 'fetchping', 'geolocate', 'hexdump', 'httpget', 'httphead', 'ntpdate', 'rdap', 'speedtest']);
+const COOKBOOK = new Set(['aesbench', 'cfdns', 'cfpurge', 'cfzones', 'clipread', 'cookbook', 'doh', 'domaindeep', 'fetchping', 'geolocate', 'hexdump', 'httpget', 'httphead', 'ntpdate', 'rdap', 'speedtest', 'ctsub', 'dnsall', 'waybackurls', 'sitemapenum', 'httpsec', 'techfp', 'dangling', 'asninfo', 'reputation', 'urlscan', 'threatfox', 'cve', 'certwatch', 'torexit', 'wellknown', 'mailsec', 'dnssec', 'rdapip', 'faviconhash', 'iocextract', 'urlinfo', 'emailheaders']);
 
 function showView(v) {
   const dash = v === "dash";
@@ -3447,7 +4035,7 @@ function renderDash(filter) {
       grid.className = "dash-grid";
       const el = document.createElement("div");
       el.className = "card";
-      el.innerHTML = '<div class="ci">🔒</div><div class="cn">Operators Cookbook</div><div class="cd">16 advanced ops tools inside — master key required. Tap to unlock.</div><div class="cc">cookbook</div>';
+      el.innerHTML = '<div class="ci">🔒</div><div class="cn">Operators Cookbook</div><div class="cd">38 advanced ops tools inside — master key required. Tap to unlock.</div><div class="cc">cookbook</div>';
       el.onclick = () => { showView("term"); input.value = "cookbook "; setTimeout(() => input.focus(), 50); };
       grid.appendChild(el);
       g.appendChild(grid);
